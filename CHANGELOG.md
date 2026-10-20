@@ -5,6 +5,8 @@
 - Restore the shared hover feedback on flat controls, including Sync, model
   refresh and the workspace terminal.
 - Place model information and its refresh control first in Settings.
+- Rename Create with agent to Create repository and explain that the entered
+  address is saved for later synchronization.
 - Align Stop with Send at the right edge and status text with the Push changes
   checkbox; keep the activity spinner after the status text.
 

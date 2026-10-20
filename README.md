@@ -17,8 +17,11 @@ separate.
 ## Sync between installations
 
 1. **On your first installation**, install the plugin and select your existing
-   configuration repository. If you do not have one, use **Create with agent**
-   to prepare a private repository from portable preferences.
+   configuration repository. If you do not have one, enter its intended
+   `owner/name` or URL and use **Create repository** to ask the selected agent
+   to prepare a private repository from portable preferences. The address is
+   saved in Settings before creation; if creation fails, it stays configured
+   for retrying. The panel does not discover a different URL from the reply.
 2. **Save reusable changes** there. Describe what to configure in the panel and
    enable **Push changes** when you want the agent to update that repository.
 3. **On another Omarchy installation**, install the plugin, authenticate your
