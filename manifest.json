@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "community.agent-settings",
   "name": "Omarchy Settings Sync",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "author": "JohanKRS",
   "license": "MIT",
   "description": "Sync configuration across Omarchy installations using your own repository and local agent.",

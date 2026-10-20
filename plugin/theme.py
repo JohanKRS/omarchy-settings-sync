@@ -97,6 +97,10 @@ class Theme:
             button.suggested-action {{ color: {accent}; background: alpha({accent}, .10);
                                       border-color: alpha({accent}, .6); }}
             button.flat, headerbar button {{ border-color: transparent; background: transparent; }}
+            button.flat:hover:not(:disabled), .popup-header button:hover:not(:disabled),
+            headerbar button:hover:not(:disabled) {{
+                background: alpha({fg}, {alpha("hover-cursor-fill-alpha", .08)});
+            }}
             button:disabled {{ opacity: .4; }}
             check {{ border-radius: {radius}px; background: {bg}; border: 1px solid alpha({fg}, .4); }}
             check:checked {{ background: {accent}; color: {bg}; }}
@@ -112,6 +116,7 @@ class Theme:
             .card-role {{ color: {accent}; font-size: {max(1, size - 1)}px; opacity: 1; }}
             .composer {{ background: alpha({fg}, .025); border: 1px solid alpha({fg}, .3);
                          border-radius: {radius}px; padding: 8px; }}
+            .composer-footer {{ padding: 0 9px; }}
             textview, textview text {{ background: transparent; color: {fg}; }}
             textview text selection, entry selection {{ background: alpha({accent}, .35); }}
             .muted, .status {{ color: alpha({fg}, .65); opacity: 1; }}

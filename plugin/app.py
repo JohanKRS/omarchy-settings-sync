@@ -356,16 +356,18 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.input_area.append(row)
         outer.append(self.input_area)
         bottom = box(False, 8)
+        bottom.add_css_class("composer-footer")
         self.spinner = Gtk.Spinner()
         self.spinner.set_size_request(16, 16)
-        bottom.append(self.spinner)
         self.status = label(tr('Ready'), "status")
+        self.status.set_margin_start(4)  # Match the checkbox's internal leading inset.
         self.status.set_wrap(False)
         self.status.set_ellipsize(Pango.EllipsizeMode.END)
         self.status.set_max_width_chars(1)
         self.status.connect("notify::label", lambda *_: self.status.set_tooltip_text(self.status.get_text()))
         self.status.set_hexpand(True)
         bottom.append(self.status)
+        bottom.append(self.spinner)
         self.stop_button.set_size_request(104, 36)
         self.stop_button.set_valign(Gtk.Align.CENTER)
         self.terminal_button = Gtk.Button(icon_name="utilities-terminal-symbolic", tooltip_text=tr('Open workspace terminal'))
@@ -1479,15 +1481,15 @@ class SettingsWindow(Gtk.ApplicationWindow):
         for side in ("top", "bottom", "start", "end"):
             getattr(content, "set_margin_" + side)(24)
         dialog.set_content(content)
+        if self.model_info.get_parent():
+            self.model_info.get_parent().remove(self.model_info)
+        content.append(self.model_info)
         repository = Gtk.Entry(placeholder_text=tr('owner/dotfiles'))
         repository.set_text(self.settings.get("repository", ""))
         content.append(self.control(tr('Repository'), repository))
         branch = Gtk.Entry(placeholder_text=tr('Default branch'))
         branch.set_text(self.settings.get("branch", ""))
         content.append(self.control(tr('Branch'), branch))
-        if self.model_info.get_parent():
-            self.model_info.get_parent().remove(self.model_info)
-        content.append(self.model_info)
         mode = dropdown([tr('Auto review'), tr('Ask for approval'), tr('Read only')])
         modes = ["auto", "ask", "read"]
         current_mode = self.settings.get("permissions", "auto")

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5 — Unreleased
+
+- Restore the shared hover feedback on flat controls, including Sync, model
+  refresh and the workspace terminal.
+- Place model information and its refresh control first in Settings.
+- Align Stop with Send at the right edge and status text with the Push changes
+  checkbox; keep the activity spinner after the status text.
+
 ## 0.1.4 — Unreleased
 
 - Add a durable per-agent follow-up queue with review, pause/resume, edit and
