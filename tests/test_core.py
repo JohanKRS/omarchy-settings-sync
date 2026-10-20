@@ -131,7 +131,7 @@ class ContextTest(unittest.TestCase):
         self.assertIn("No changes.", prompt)
         self.assertIn("Não examine arquivos locais", prompt)
         self.assertIn("a" * 40, prompt)
-        self.assertNotIn("## Preparação", prompt)
+        self.assertNotIn("## Prepare", prompt)
 
     def test_partial_sync_cannot_claim_no_changes(self):
         private_write(self.record_path, dict(self.record, status="partial", pending=["keyboard"]))

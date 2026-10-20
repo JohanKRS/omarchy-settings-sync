@@ -1,0 +1,89 @@
+# Omarchy compatibility
+
+The plugin is a bar entry point for an agent-assisted configuration sync panel.
+It is implemented as a QML widget plus a GTK companion application, rather than
+as a copy of the native clock panel tutorial.
+
+## Contracts
+
+| Reference requirement | Implementation |
+| --- | --- |
+| One repository with a root manifest | `manifest.json`, schema 1, one `bar-widget` kind |
+| Permanent non-reserved ID | `community.agent-settings`; no `omarchy.*` namespace or clone-only metadata |
+| Author, version, description and license | Declared in the manifest; MIT license at the root |
+| Safe relative entry point; no packaged symlinks | `plugin/BarWidget.qml`; checked before release |
+| Existing shell process | `Ui.BarWidget` and `Ui.BarIconButton` are hosted by Omarchy; no second Quickshell |
+| Open/close lifecycle | `opened`, `open()`, `close()`, `toggle()` and `closeForPopoutSwitch()` forward to the GTK application |
+| Shell IPC | `omarchy-shell shell summon`, `hide` and `toggle` route through the live bar widget |
+| Popout coordination | The widget requests/releases the bar's active popout when GTK visibility changes |
+| User-owned installation | Omarchy installs under `~/.config/omarchy/plugins/`; packaged system files are not modified |
+| Normal package installation | The optional first-run bootstrap uses `omarchy pkg add` in a visible terminal |
+| Data ownership | Personal configuration belongs in a separate repository and XDG state paths |
+
+The current ID was absent from both active and retired IDs in the marketplace
+registry checked during preparation. The marketplace makes the final uniqueness
+decision; changing a published ID would require migration planning.
+
+## GTK design and limits
+
+The companion uses GTK4 Layer Shell for monitor-aware placement, focus, Escape
+and outside-click behavior. Visibility and pending-question state are shared
+through a small local heartbeat file, without conversation text. Expired state
+is ignored after 30 seconds. Shell open/close calls use the normal application
+entry point; a hide request never creates an absent panel.
+
+The bar icon uses Omarchy's shared icon component and dimensions. The GTK panel
+reads the active theme's palette, font and control styling. It does not implement
+all QML-specific gradient/border tokens, the complete `Style.spacing` contract,
+or native Tab navigation between bar popouts. Tab navigates the GTK form. These
+are documented architectural differences, not a claim of pixel-identical native
+QML rendering.
+
+The interface remains available for up to 60 seconds after an idle close to
+speed up reopening. Idle agent connections are closed separately. Theme polling
+pauses while hidden; the VTE terminal is initialized only when an external CLI
+is launched. There is no permanent background sync service.
+
+## Validation
+
+Portable checks cover repository packaging, links, JSON, Python/shell syntax,
+protocol handling, agent argument construction, context state and model formats.
+The graphical smoke test covers layout stability, approvals, questions, session
+resume, cancellation, disconnection, terminals and temporary UI retention.
+
+Run these additional checks on a real Omarchy session:
+
+```sh
+omarchy plugin validate .
+bash tools/lint_qml.sh
+python3 tests/ui_smoke.py
+omarchy-shell shell summon community.agent-settings '{}'
+omarchy-shell shell hide community.agent-settings
+omarchy-shell shell toggle community.agent-settings '{}'
+```
+
+`lint_qml.sh` supplies a temporary `qs` import alias because Quickshell resolves
+that namespace virtually at runtime. It creates no symlink in the plugin.
+Confirm disable/re-enable, theme behavior and shell restart before release.
+Removal is handled by Omarchy's plugin manager; finish active tasks first and
+check that user state remains intact. Multi-monitor and non-default theme scaling
+need testing on the target setup.
+
+The local release checks used Omarchy 4.0.5-1, Codex CLI 0.163.0 and Claude Code
+2.1.302. OpenCode and Cursor catalog adapters have fixture tests; other agent
+accounts have not been exercised in this environment.
+
+The prepared 0.1.3 build passed the Omarchy manifest validator, QML lint, 22
+portable tests, the graphical smoke test and the D-Bus launcher smoke test.
+Live shell checks passed for summon, hide, toggle, switching to the clock popout
+and disabling/re-enabling the widget. Reopening reused the same process and the
+bar layout remained unchanged. Synthetic screenshots were inspected before
+packaging. These local checks do not replace marketplace review.
+
+## References
+
+- [Marketplace development guide](https://plugins.omarchy.org/develop.html)
+- [Marketplace publishing guide](https://plugins.omarchy.org/publish.html)
+- [Official Omarchy shell reference](https://github.com/omacom/omarchy/blob/quattro/docs/omarchy-shell.md)
+- [Marketplace submission requirements](https://github.com/omacom/omarchy-plugin-marketplace/blob/main/SUBMISSION.md)
+- [Marketplace security baseline](https://github.com/omacom/omarchy-plugin-marketplace/blob/main/SECURITY.md)

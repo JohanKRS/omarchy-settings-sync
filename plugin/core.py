@@ -149,7 +149,7 @@ def make_prompt(task, *, repository, branch="", sync=False, publish=True, create
             "WORKFLOW.md indicado acima e atualize sync_record_path somente após validar."
         )
     return (
-        f"Pedido enviado pelo usuário no plugin Omarchy Settings:\n{action}\n\n"
+        f"Pedido enviado pelo usuário no plugin Omarchy Settings Sync:\n{action}\n\n"
         f"Idioma da interface: {LANGUAGE}. Responda nesse idioma, a menos que o usuário peça outro.\n"
         f"Repositório de CONFIGURAÇÕES autorizado: {repository}\n"
         f"Branch: {branch or 'a branch padrão informada pelo remoto'}\n"
@@ -200,7 +200,7 @@ class CodexClient:
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
         self.request("initialize", {
-            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings", "version": "0.1.2"},
+            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.1.3"},
             "capabilities": {"experimentalApi": True},
         })
         self.notify("initialized", {})
@@ -356,6 +356,6 @@ def terminal(command, workspace=None):
     cwd = str(workspace or paths()["workspace"])
     Path(cwd).mkdir(parents=True, exist_ok=True)
     return subprocess.Popen(
-        ["xdg-terminal-exec", "--title=Omarchy Settings", f"--dir={cwd}", "--", *command],
+        ["xdg-terminal-exec", "--title=Omarchy Settings Sync", f"--dir={cwd}", "--", *command],
         start_new_session=True,
     )

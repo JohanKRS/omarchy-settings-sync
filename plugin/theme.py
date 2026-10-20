@@ -83,6 +83,9 @@ class Theme:
             button, entry, dropdown > button {{ background: alpha({fg}, {alpha("normal-fill-alpha", .04)});
                 color: {fg}; border: 1px solid alpha({fg}, {alpha("normal-border-alpha", .4)});
                 border-radius: {radius}px; box-shadow: none; text-shadow: none; min-height: 24px; }}
+            dropdown > button {{ padding: 5px 10px; min-height: 24px; }}
+            .empty-title {{ font-weight: 600; font-size: {title}px; }}
+            .status {{ font-size: {max(1, size - 1)}px; }}
             button:hover, dropdown > button:hover {{ background: alpha({fg}, {alpha("hover-cursor-fill-alpha", .08)}); }}
             dropdown popover > contents {{ border: 1px solid alpha({fg}, .4);
                 border-radius: {radius}px; box-shadow: none; }}

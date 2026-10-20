@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a reproducible problem with the sync panel.
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, private repository contents or unredacted agent logs. Follow SECURITY.md for sensitive reports.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Versions and environment
+      description: Omarchy version, plugin version/commit, agent CLI/version, bar position and display scale.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use an example repository and synthetic configuration where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots or redacted diagnostics
