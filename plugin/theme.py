@@ -84,6 +84,12 @@ class Theme:
                 color: {fg}; border: 1px solid alpha({fg}, {alpha("normal-border-alpha", .4)});
                 border-radius: {radius}px; box-shadow: none; text-shadow: none; min-height: 24px; }}
             button:hover, dropdown > button:hover {{ background: alpha({fg}, {alpha("hover-cursor-fill-alpha", .08)}); }}
+            dropdown popover > contents {{ border: 1px solid alpha({fg}, .4);
+                border-radius: {radius}px; box-shadow: none; }}
+            dropdown popover listview {{ background: {bg}; color: {fg}; }}
+            dropdown popover row {{ background: transparent; color: {fg}; border-radius: {radius}px; }}
+            dropdown popover row:hover {{ background: alpha({fg}, .08); }}
+            dropdown popover row:selected {{ background: alpha({accent}, .16); color: {fg}; }}
             button:focus-visible, entry:focus-within {{ outline: 1px solid {accent}; outline-offset: -1px; }}
             button.suggested-action {{ color: {accent}; background: alpha({accent}, .10);
                                       border-color: alpha({accent}, .6); }}

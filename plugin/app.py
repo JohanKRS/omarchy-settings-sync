@@ -64,16 +64,24 @@ def box(vertical=True, spacing=8):
 
 def dropdown(values):
     widget = Gtk.DropDown.new_from_strings(values)
-    factory = Gtk.SignalListItemFactory()
-    def setup(_factory, item):
-        item.set_child(Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, max_width_chars=19))
-    def bind(_factory, item):
-        text = item.get_item().get_string()
-        item.get_child().set_text(text)
-        item.get_child().set_tooltip_text(text)
-    factory.connect("setup", setup)
-    factory.connect("bind", bind)
-    widget.set_factory(factory)
+    def make_factory(compact):
+        factory = Gtk.SignalListItemFactory()
+        def setup(_factory, item):
+            item.set_child(Gtk.Label(
+                xalign=0,
+                ellipsize=Pango.EllipsizeMode.END if compact else Pango.EllipsizeMode.NONE,
+                max_width_chars=19 if compact else -1,
+            ))
+        def bind(_factory, item):
+            text = item.get_item().get_string()
+            item.get_child().set_text(text)
+            item.get_child().set_tooltip_text(text)
+        factory.connect("setup", setup)
+        factory.connect("bind", bind)
+        return factory
+    # Keep the toolbar compact; size the open list for the complete option names.
+    widget.set_factory(make_factory(True))
+    widget.set_list_factory(make_factory(False))
     return widget
 
 
@@ -88,6 +96,7 @@ class Panel(Gtk.Box):
             getattr(self, "set_margin_" + side)(12)
         header = box(False)
         heading = label(title, "title")
+        heading.set_selectable(False)
         heading.set_hexpand(True)
         header.append(heading)
         close = Gtk.Button(icon_name="window-close-symbolic")
@@ -152,6 +161,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.theme = Theme(self)
         self.theme_timer = GLib.timeout_add_seconds(2, self.theme.refresh)
         self.connect("close-request", self.close_window)
+        self.connect("map", self.focus_content)
         keys = Gtk.EventControllerKey()
         keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         keys.connect("key-pressed", self.popup_key)
@@ -193,6 +203,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         icon.set_pixel_size(26)
         header.append(icon)
         title = label("Omarchy Settings", "title")
+        title.set_selectable(False)
         title.set_hexpand(True)
         header.append(title)
         settings_button = Gtk.Button(icon_name="emblem-system-symbolic", tooltip_text=tr('Settings'))
@@ -338,6 +349,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.popup_bounds = (x, y, width, height)
         self.popup_card.set_size_request(width, height)
         self.popup_canvas.move(self.popup_card, x, y)
+
+    def focus_content(self, *_):
+        if not self.panels:
+            target = self.vte if self.terminal_pid and self.vte else self.input
+            target.grab_focus()
 
     def popup_key(self, _controller, key, _code, _state):
         if key == Gdk.KEY_Escape:
