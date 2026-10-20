@@ -7,7 +7,7 @@
   preserving composer drafts and queued work. Ignore incomplete streaming
   options, older messages and repeated clicks. Structured question dialogs
   keep their existing behavior.
-- Use a straight upward arrow for the queue's **Direct now / Send now** action.
+- Use an upload-style arrow for the queue's **Direct now / Send now** action.
 - Keep initial requests and configuration context out of every external CLI's
   process arguments. Open the interactive CLI without a prompt and provide
   **Copy request** for manual paste and send, including the standalone terminal

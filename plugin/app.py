@@ -33,6 +33,8 @@ from message_view import MessageBody
 from activity_indicator import ActivityIndicator
 
 NATIVE_AGENTS = {"codex", "claude"}
+DIRECTION_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
+    str(Path(__file__).with_name('icons') / 'direction-upload-symbolic.svg')))
 
 from core import (
     AGENTS, ROOT, CodexClient, cached_models, codex_defaults, default_agent, external_command,
@@ -851,7 +853,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             row.append(preview)
             if native:
                 title = tr('Direct now') if self.busy else tr('Send now')
-                now = self.queue_action('go-up-symbolic', title,
+                now = self.queue_action(DIRECTION_ICON, title,
                                         lambda _, e=entry: self.send_queued_now(e))
                 if self.busy and self.agent() == 'claude':
                     now.set_tooltip_text(title + '\n' + tr('Interrupt and continue in the same conversation.'))
@@ -871,7 +873,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
     @staticmethod
     def queue_action(icon, title, action):
-        button = Gtk.Button(icon_name=icon, tooltip_text=title)
+        image = Gtk.Image.new_from_gicon(icon) if isinstance(icon, Gio.Icon) else Gtk.Image.new_from_icon_name(icon)
+        button = Gtk.Button(child=image, tooltip_text=title)
         button.add_css_class('flat')
         button.add_css_class('queue-action')
         button.update_property([Gtk.AccessibleProperty.LABEL], [title])
