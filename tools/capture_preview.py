@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Capture the panel with synthetic data; requires an Omarchy session and grim."""
 import os
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -11,7 +12,7 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 os.environ['AGENT_SETTINGS_LANGUAGE'] = 'en'
 sys.path.insert(0, str(ROOT / 'plugin'))
-from app import Gtk, GLib, SettingsWindow
+from app import Gtk, GLib, SettingsWindow, LayerShell
 from core import private_write
 
 MODELS = [{'model': '', 'displayName': 'Default', 'supportedReasoningEfforts': []}]
@@ -36,6 +37,8 @@ with tempfile.TemporaryDirectory(prefix='omarchy-settings-preview-') as temp:
         application = Gtk.Application(application_id='org.omarchy.AgentSettings.Preview')
         application.register(None)
         window = SettingsWindow(application)
+        LayerShell.set_keyboard_mode(window, LayerShell.KeyboardMode.NONE)
+        window.set_can_target(False)
         window.present()
         settle()
         x, y, width, height = map(int, window.popup_bounds)
@@ -54,8 +57,55 @@ with tempfile.TemporaryDirectory(prefix='omarchy-settings-preview-') as temp:
         settle()
         subprocess.run(['grim', '-g', region, str(ROOT / 'docs/questions.png')], check=True)
         window.clear_questions()
+        window.add_message('You', 'Compare the portable desktop folder options.')
+        window.add_message('Agent', '''## Desktop folder options
+
+Choose the location that fits this installation. See the [XDG documentation](https://www.freedesktop.org/wiki/Software/xdg-user-dirs/).
+
+| Option | Result |
+| --- | --- |
+| **Desktop** | Shortcuts go into `~/Desktop`. |
+| **Hidden folder** | Use `~/.local/share/desktop` to keep Home clean. |
+| **Current setup** | Hide individual files with `.hidden`. |
+
+**Bold**, *italic*, ~~removed~~ and `inline code` are supported. HTML can format <b>text</b> and insert<br>a line break.
+
+- [x] Keep local preferences
+- [ ] Save the reusable configuration
+
+```sh
+xdg-user-dir DESKTOP
+```
+''')
+        window.turn_id = 'preview-turn'
+        window.queue_message('Use the hidden folder and preserve existing shortcuts.')
+        window.queue_message('Then document the portable setup.\nKeep the machine-specific paths local.')
+        window.queue_message('Check the result on the next installation.')
+        window.status.set_text('Working…')
+        window.update_buttons()
+        window.input.grab_focus()
+        settle()
+        window.scroll.get_vadjustment().set_value(110)
+        settle()
+        subprocess.run(['grim', '-g', region, str(ROOT / 'docs/conversation.png')], check=True)
+        # Verify the native spinner changes frames after hiding/reopening the
+        # panel, the lifecycle that used to leave GTK's SVG paused.
+        window.set_visible(False)
+        settle()
+        window.present()
+        settle()
+        ok, bounds = window.spinner.compute_bounds(window)
+        assert ok
+        spinner_region = f'{int(bounds.get_x())},{int(bounds.get_y())} {int(bounds.get_width())}x{int(bounds.get_height())}'
+        frames = []
+        for _ in range(3):
+            settle()
+            frames.append(hashlib.sha256(subprocess.check_output(['grim', '-g', spinner_region, '-'])).hexdigest())
+        assert len(set(frames)) > 1, 'Activity indicator did not animate after reopening'
+        window.busy = False
+        window.update_buttons()
         window.client = None
         GLib.source_remove(window.theme_timer)
         GLib.source_remove(window.attention_timer)
         window.destroy()
-        print('Captured preview.png and docs/questions.png using synthetic configuration')
+        print('Captured preview.png, docs/questions.png and docs/conversation.png; spinner animates after reopening')

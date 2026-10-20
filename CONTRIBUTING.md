@@ -40,6 +40,9 @@ and 3.14; graphical and shell integration checks require an Omarchy session.
 - `plugin/claude_client.py` adapts Claude's bidirectional stream protocol.
 - `plugin/catalog.py` queries model metadata without starting a conversation.
 - `plugin/context.py` tracks local sync activity and repository identity.
+- `plugin/message_markup.py` parses Markdown and restricts inline markup/links;
+  `plugin/message_view.py` builds the native message widgets. The pinned parser
+  and its update instructions are in `plugin/_vendor/`.
 - `plugin/WORKFLOW.md` contains the instructions sent to the agent for syncs.
 
 See [compatibility notes](docs/COMPATIBILITY.md) before changing shell integration.
@@ -59,8 +62,9 @@ Generate screenshots with synthetic data in a running Omarchy session:
 AGENT_SETTINGS_LANGUAGE=en python3 tools/capture_preview.py
 ```
 
-This captures only the test panel into `preview.png` and
-`docs/questions.png`. Inspect both images before committing. Do not include
+This captures only the test panel into `preview.png`, `docs/questions.png` and
+`docs/conversation.png`, and checks activity animation after reopening.
+Inspect all images before committing. Do not include
 private repositories, usernames from filesystem paths, tokens or conversations.
 
 ## Changes and releases
@@ -71,5 +75,7 @@ do not need new tests. Keep the manifest version and Codex client information in
 sync, and update `CHANGELOG.md` for user-visible changes.
 
 Follow [RELEASING.md](docs/RELEASING.md) for publication and marketplace submission.
+Every published version gets an annotated `vX.Y.Z` tag and a GitHub Release with
+the corresponding dated changelog entry. Do not move existing release tags.
 Do not change the permanent plugin ID casually: existing installations and
 marketplace records depend on it.

@@ -117,6 +117,20 @@ class Theme:
             .composer {{ background: alpha({fg}, .025); border: 1px solid alpha({fg}, .3);
                          border-radius: {radius}px; padding: 8px; }}
             .composer-footer {{ padding: 0 9px; }}
+            .queue-area {{ padding: 0 2px; }}
+            .queue-row {{ border-bottom: 1px solid alpha({fg}, .1); }}
+            .queue-area label {{ font-size: {max(1, size - 1)}px; }}
+            button.queue-action {{ min-height: 24px; min-width: 24px; padding: 1px; }}
+            .markdown-heading {{ font-size: {max(1, size + 1)}px; }}
+            .markdown-code {{ background: alpha({fg}, .04); padding: 8px; }}
+            .markdown-quote {{ border-left: 2px solid alpha({accent}, .5); padding-left: 10px; }}
+            .markdown-cell {{ padding: 7px; border-right: 1px solid alpha({fg}, .16);
+                              border-bottom: 1px solid alpha({fg}, .16); }}
+            .markdown-table {{ border-top: 1px solid alpha({fg}, .16); border-left: 1px solid alpha({fg}, .16); }}
+            .markdown-table-header {{ background: alpha({fg}, .06); }}
+            label link {{ color: {accent}; }}
+            button.scroll-latest {{ background: {bg}; border-color: alpha({fg}, .25);
+                                    border-radius: 50%; min-height: 24px; min-width: 24px; padding: 4px; }}
             textview, textview text {{ background: transparent; color: {fg}; }}
             textview text selection, entry selection {{ background: alpha({accent}, .35); }}
             .muted, .status {{ color: alpha({fg}, .65); opacity: 1; }}

@@ -75,6 +75,15 @@ accounts have not been exercised in this environment.
 
 ## Follow-up support
 
+The 0.1.7 update keeps the queue inline above the composer, limits its height and
+renders message formatting with native GTK widgets. Its 38 portable tests cover
+tables, nested formatting, escaping, links and partial streaming input as well as
+the existing protocols. The Portuguese graphical test covers the queue's layout
+and actions, Markdown tables, jump-to-latest and activity-indicator recreation.
+Synthetic screenshot capture also compares activity frames after reopening to
+verify animation. The GTK 4.24 spinner workaround replaces only the unmapped
+indicator; it does not override the desktop's motion preference.
+
 The 0.1.6 update adds separate native Claude permission settings using
 `--permission-mode auto|default|acceptEdits|plan`. Protocol tests check launch
 arguments and invalid modes; the graphical test covers independent persistence,

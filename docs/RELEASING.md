@@ -3,6 +3,11 @@
 Keep the release description centered on synchronizing configuration across
 Omarchy installations using the user's own repository.
 
+The owner's release convention is to publish every version with an annotated
+`vX.Y.Z` tag and a GitHub Release whose notes come from its dated changelog entry.
+Tags are optional for marketplace submission, but required by this repository's
+release workflow. Never move an existing published tag; use a new version.
+
 ## Prepare a version
 
 1. Keep the manifest version and Codex client information in sync. Update the
@@ -34,8 +39,10 @@ After the owner authorizes publication:
   repositories stay separate and keep their existing visibility.
 - Enable GitHub private vulnerability reporting if available, and confirm the
   report link shown in SECURITY.md works.
-- Tag the tested version and create release notes from CHANGELOG.md. Mark the
-  changelog entry with the actual release date when releasing.
+- After CI passes for the exact commit, create and push its annotated `vX.Y.Z`
+  tag. Create a GitHub Release with that version's `CHANGELOG.md` entry as the
+  notes (use `gh release create --verify-tag --notes-file` with a prepared file).
+  Mark the changelog entry with the actual release date before committing.
 - Test installation from the public URL and updates through Omarchy's updater.
 
 No automation in this repository changes visibility, publishes releases,

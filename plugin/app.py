@@ -29,6 +29,8 @@ from catalog import MODEL_AGENTS, DISCOVERY_AGENTS, agent_executable, discover_m
 from claude_client import ClaudeClient, PERMISSION_MODES as CLAUDE_PERMISSION_MODES
 from outbox import Outbox
 from chat_view import ChatView
+from message_view import MessageBody
+from activity_indicator import ActivityIndicator
 
 NATIVE_AGENTS = {"codex", "claude"}
 
@@ -159,7 +161,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.turn_id = None
         self.outbox = Outbox(self.locations["state"] / "outbox.json")
         self.queue_paused = bool(self.outbox.entries)
-        self.queue_panel = None
         self.delivery_pending = False
         self.redirect_entry = None
         self.stopping = False
@@ -296,7 +297,19 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.content.set_vhomogeneous(False)
         self.scroll = ChatView()
         self.transcript = self.scroll.messages
-        self.content.add_named(self.scroll, "chat")
+        self.chat_overlay = Gtk.Overlay(child=self.scroll)
+        self.latest_button = Gtk.Button(icon_name='go-bottom-symbolic', tooltip_text=tr('Jump to latest'),
+                                        halign=Gtk.Align.END, valign=Gtk.Align.END, visible=False)
+        self.latest_button.add_css_class('scroll-latest')
+        self.latest_button.set_margin_end(12)
+        self.latest_button.set_margin_bottom(12)
+        self.latest_button.update_property([Gtk.AccessibleProperty.LABEL], [tr('Jump to latest')])
+        self.latest_button.connect('clicked', lambda *_: self.scroll.to_end(force=True))
+        self.chat_overlay.add_overlay(self.latest_button)
+        adjustment = self.scroll.get_vadjustment()
+        adjustment.connect('changed', self.update_latest_button)
+        adjustment.connect('value-changed', self.update_latest_button)
+        self.content.add_named(self.chat_overlay, "chat")
         empty = box(spacing=10)
         empty.set_valign(Gtk.Align.CENTER)
         empty.set_halign(Gtk.Align.FILL)
@@ -312,6 +325,22 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.content.add_named(empty, "empty")
         self.vte = None
         outer.append(self.content)
+        self.queue_area = box(spacing=2)
+        self.queue_area.add_css_class('queue-area')
+        queue_header = box(False, 6)
+        self.queue_count = Gtk.Label(xalign=0, hexpand=True)
+        self.queue_count.add_css_class('muted')
+        queue_header.append(self.queue_count)
+        self.queue_toggle = self.queue_action('media-playback-pause-symbolic', tr('Pause queue'),
+                                              lambda *_: self.toggle_queue())
+        queue_header.append(self.queue_toggle)
+        self.queue_area.append(queue_header)
+        self.queue_list = box(spacing=2)
+        self.queue_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                               max_content_height=96, propagate_natural_height=True)
+        self.queue_scroll.set_child(self.queue_list)
+        self.queue_area.append(self.queue_scroll)
+        outer.append(self.queue_area)
         self.input_area = box(spacing=8)
         self.input_area.add_css_class("composer")
         self.input = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
@@ -348,10 +377,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.stop_button.set_size_request(36, 36)
         self.stop_button.update_property([Gtk.AccessibleProperty.LABEL], [tr('Stop')])
         self.stop_button.connect("clicked", lambda *_: self.stop())
-        self.queue_button = Gtk.Button(label=tr('{count} queued', count=0))
-        self.queue_button.add_css_class('flat')
-        self.queue_button.connect("clicked", lambda *_: self.show_queue())
-        row.append(self.queue_button)
         row.append(self.stop_button)
         self.send_button = Gtk.Button(label=tr('Send'))
         self.send_button.add_css_class("suggested-action")
@@ -362,7 +387,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         outer.append(self.input_area)
         bottom = box(False, 8)
         bottom.add_css_class("composer-footer")
-        self.spinner = Gtk.Spinner()
+        self.spinner = ActivityIndicator()
+        self.spinner.set_tooltip_text(tr('Working…'))
         self.spinner.set_size_request(16, 16)
         self.status = label(tr('Ready'), "status")
         self.status.set_margin_start(4)  # Match the checkbox's internal leading inset.
@@ -399,7 +425,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.monitor_name = monitor.get_connector() or ""
         geometry = monitor.get_geometry()
         width = min(560, max(320, geometry.width - 10))
-        height = min(660, max(300, geometry.height - bar_size - 10))
+        height = min(740, max(300, geometry.height - bar_size - 10))
         margin = 5
         x = geometry.width - width - margin if anchor_x is None else max(margin, min(anchor_x - width / 2, geometry.width - width - margin))
         y = bar_size + margin
@@ -725,7 +751,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.publish.set_sensitive(not running and not self.delivery_pending)
         self.stop_button.set_sensitive(running and not self.stopping)
         self.stop_button.set_visible(running)
-        self.spinner.set_spinning(self.busy and not self.attention_waiting)
+        working = self.busy and not self.attention_waiting
+        self.spinner.set_spinning(working)
         self.update_queue()
 
     def composer_key(self, _controller, key, _code, state):
@@ -748,104 +775,105 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
     def update_queue(self):
         entries = self.outbox.for_agent(self.agent())
-        self.queue_button.set_label(tr('{count} queued', count=len(entries)))
-        self.queue_button.set_visible(bool(entries))
-        self.queue_button.set_tooltip_text(tr('Queue paused') if self.queue_paused else tr('Queued messages'))
-        if self.queue_panel in self.panels:
-            self.render_queue()
-
-    def show_queue(self):
-        if self.queue_panel in self.panels:
-            return
-        self.queue_panel = Panel(self, tr('Queued messages'))
-        self.render_queue()
-        self.queue_panel.present()
-
-    def render_queue(self):
-        content = box(spacing=12)
-        entries = self.outbox.for_agent(self.agent())
+        self.queue_area.set_visible(bool(entries))
         native = self.agent() in NATIVE_AGENTS and not self.terminal_pid
-        content.append(label(tr('Messages are saved until sent. Stop or an error pauses the queue.') if native else
-                             tr('Copy a message, paste it into the agent input, then use its send or queue keys. Remove it here after sending.')))
-        if entries and native:
-            resume = Gtk.Button(label=tr('Resume queue') if self.queue_paused or not self.busy else tr('Pause queue'))
-            resume.set_sensitive(not self.delivery_pending and not self.stopping)
-            def toggle(*_):
-                self.queue_paused = not self.queue_paused if self.busy else False
-                self.queue_panel.destroy()
-                self.drain_queue()
-                self.update_buttons()
-            resume.connect('clicked', toggle)
-            content.append(resume)
-        if not entries:
-            content.append(label(tr('No queued messages.')))
+        count = tr('{count} queued', count=len(entries))
+        self.queue_count.set_text(f'{count} · {tr("Queue paused")}' if native and self.queue_paused else count)
+        self.queue_count.set_tooltip_text(tr('Messages are saved until sent. Stop or an error pauses the queue.') if native else
+                                         tr('Copy a message, paste it into the agent input, then use its send or queue keys. Remove it here after sending.'))
+        resume = self.queue_paused or not self.busy
+        title = tr('Resume queue') if resume else tr('Pause queue')
+        self.queue_toggle.set_icon_name('media-playback-start-symbolic' if resume else 'media-playback-pause-symbolic')
+        self.queue_toggle.set_tooltip_text(title)
+        self.queue_toggle.update_property([Gtk.AccessibleProperty.LABEL], [title])
+        self.queue_toggle.set_visible(native)
+        self.queue_toggle.set_sensitive(not self.delivery_pending and not self.stopping)
+        while self.queue_list.get_first_child():
+            self.queue_list.remove(self.queue_list.get_first_child())
         for entry in entries:
-            card = box(spacing=6)
-            card.add_css_class('message')
-            card.append(label(entry['text'], selectable=True))
-            card.append(label(tr('Push changes') if entry['publish'] else tr('Local changes only'), 'muted'))
+            row = box(False, 2)
+            row.add_css_class('queue-row')
+            preview = Gtk.Label(label=' '.join(entry['text'].split()), xalign=0, hexpand=True,
+                                ellipsize=Pango.EllipsizeMode.END, width_chars=1, max_width_chars=1)
+            details = [entry['text'], tr('Push changes') if entry['publish'] else tr('Local changes only')]
+            warning = None
             if not self.queue_matches(entry):
-                card.append(label(tr('From another conversation or repository. Edit to reuse.')))
+                warning = tr('From another conversation or repository. Edit to reuse.')
             if entry.get('state') == 'uncertain':
-                card.append(label(tr('Delivery unconfirmed. Check the conversation before editing and retrying.')))
-            actions = box(False, 8)
+                warning = tr('Delivery unconfirmed. Check the conversation before editing and retrying.')
+            if warning:
+                details.append(warning)
+                indicator = Gtk.Image.new_from_icon_name('dialog-warning-symbolic')
+                indicator.set_tooltip_text(warning)
+                indicator.update_property([Gtk.AccessibleProperty.LABEL], [warning])
+                row.append(indicator)
+            preview.set_tooltip_text('\n\n'.join(details))
+            row.append(preview)
             if native:
-                now = Gtk.Button(label=tr('Direct now') if self.busy else tr('Send now'))
-                now.add_css_class('suggested-action')
-                now.set_tooltip_text(tr('Interrupt and continue in the same conversation.')
-                                     if self.busy and self.agent() == 'claude' else tr('Ctrl+Enter'))
+                title = tr('Direct now') if self.busy else tr('Send now')
+                now = self.queue_action('go-jump-symbolic' if self.busy else 'mail-send-symbolic', title,
+                                        lambda _, e=entry: self.send_queued_now(e))
+                if self.busy and self.agent() == 'claude':
+                    now.set_tooltip_text(title + '\n' + tr('Interrupt and continue in the same conversation.'))
                 now.set_sensitive(not self.delivery_pending and not self.stopping and self.queue_matches(entry)
                                   and entry.get('state') == 'pending' and entry is not self.redirect_entry
                                   and (not self.busy or bool(self.turn_id)))
-                now.connect('clicked', lambda _, e=entry: self.send_queued_now(e))
-                actions.append(now)
-            for title, action in ((tr('Edit'), self.edit_queued), (tr('Remove'), self.remove_queued)):
-                button = Gtk.Button(label=title, sensitive=entry.get('state') != 'sending' and entry is not self.redirect_entry)
-                button.connect('clicked', lambda _, e=entry, fn=action: fn(e))
-                actions.append(button)
-            if not native:
-                copy = Gtk.Button(label=tr('Copy to terminal'))
-                copy.connect('clicked', lambda _, e=entry: self.copy_to_terminal(e['text']))
-                actions.append(copy)
-            card.append(actions)
-            content.append(card)
-        self.queue_panel.set_content(content)
+            else:
+                now = self.queue_action('edit-copy-symbolic', tr('Copy to terminal'),
+                                        lambda _, e=entry: self.copy_to_terminal(e['text']))
+            row.append(now)
+            for icon, title, action in (('document-edit-symbolic', tr('Edit'), self.edit_queued),
+                                        ('user-trash-symbolic', tr('Remove'), self.remove_queued)):
+                button = self.queue_action(icon, title, lambda _, e=entry, fn=action: fn(e))
+                button.set_sensitive(entry.get('state') != 'sending' and entry is not self.redirect_entry)
+                row.append(button)
+            self.queue_list.append(row)
+
+    @staticmethod
+    def queue_action(icon, title, action):
+        button = Gtk.Button(icon_name=icon, tooltip_text=title)
+        button.add_css_class('flat')
+        button.add_css_class('queue-action')
+        button.update_property([Gtk.AccessibleProperty.LABEL], [title])
+        button.connect('clicked', action)
+        return button
+
+    def toggle_queue(self):
+        self.queue_paused = not self.queue_paused if self.busy else False
+        self.drain_queue()
+        self.update_buttons()
 
     def edit_queued(self, entry):
-        if entry.get('state') == 'sending' or entry is self.redirect_entry:
+        if entry not in self.outbox.entries or entry.get('state') == 'sending' or entry is self.redirect_entry:
             return
         buffer = self.input.get_buffer()
         if buffer.get_char_count():
             self.status.set_text(tr('Keep or clear your draft before editing a queued message.'))
-            self.queue_panel.destroy()
+            self.input.grab_focus()
             return
         self.queue_paused = True
         self.publish.set_active(entry['publish'])
         buffer.set_text(entry['text'])
         self.outbox.remove(entry)
-        self.queue_panel.destroy()
         self.update_buttons()
         self.input.grab_focus()
 
     def remove_queued(self, entry):
-        if entry.get('state') == 'sending' or entry is self.redirect_entry:
+        if entry not in self.outbox.entries or entry.get('state') == 'sending' or entry is self.redirect_entry:
             return
         self.outbox.remove(entry)
         self.update_buttons()
 
     def copy_to_terminal(self, text):
         self.get_clipboard().set(text)
-        if self.queue_panel in self.panels:
-            self.queue_panel.destroy()
         if self.terminal_pid and self.vte:
             self.vte.grab_focus()
         self.status.set_text(tr('Copied. Paste into the agent input with Ctrl+Shift+V.'))
 
     def send_queued_now(self, entry):
-        if self.delivery_pending or self.stopping or entry.get('state') != 'pending' or not self.queue_matches(entry):
+        if (entry not in self.outbox.entries or entry is self.redirect_entry or self.delivery_pending or self.stopping
+                or entry.get('state') != 'pending' or not self.queue_matches(entry)):
             return
-        if self.queue_panel in self.panels:
-            self.queue_panel.destroy()
         if self.busy:
             self.steer(entry['text'], queued_entry=entry)
         else:
@@ -880,9 +908,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if role == tr('You'):
             card.add_css_class("user-message")
         card.append(label(role, "card-role"))
-        body = label(text, selectable=True)
-        body.set_max_width_chars(1)
-        body.set_hexpand(True)
+        body = MessageBody(text)
         card.append(body)
         self.transcript.append(card)
         if self.agent() in NATIVE_AGENTS or role == tr("Error"):
@@ -903,6 +929,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
     def scroll_down(self):
         self.scroll.to_end()
+
+    def update_latest_button(self, adjustment):
+        self.latest_button.set_visible(
+            adjustment.get_value() < adjustment.get_upper() - adjustment.get_page_size() - 2)
 
     def failure(self, message):
         self.queue_paused = True
@@ -1460,7 +1490,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.busy or self.terminal_pid or self.delivery_pending:
             return
         if self.outbox.for_agent(self.agent()):
-            self.show_queue()
+            self.queue_toggle.grab_focus()
             return
         self.queue_paused = False
         self.close_client()

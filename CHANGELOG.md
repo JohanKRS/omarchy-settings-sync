@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.7 — 2026-10-20
+
+- Move queued messages above the composer into bounded, scrollable one-line
+  previews with direction/send, edit and remove icons. Edit restores the text
+  and publication choice to the main composer, preserving existing drafts.
+- Render Markdown tables, links, headings, lists, checklists, quotes and inline
+  formatting with native GTK widgets. Support basic inline HTML without running
+  scripts or fetching images. Bundle the pinned Mistune parser and its license.
+- Increase the maximum panel height from 660 to 740 logical pixels, constrained
+  by the monitor, and add a discreet jump-to-latest control when scrolled up.
+- Hide the activity indicator while idle or waiting for input. Recreate its
+  animation after unmapping to avoid GTK 4.24 leaving a paused spinner on reopen.
+
 ## 0.1.6 — Unreleased
 
 - Show Stop as an icon immediately before Send/Queue only while a task runs.

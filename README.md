@@ -76,7 +76,7 @@ URL. An empty branch uses the repository's default branch. See the
 | **Sync** | Ask the agent to sync the configured repository onto this installation |
 | Message field | Request a specific change; optionally publish its reusable configuration |
 | **Enter / Send / Queue** | The same button sends when idle and queues while an agent is working |
-| Queue count (shown only with pending messages) | Review, pause/resume, edit or remove saved follow-ups; use **Direct now** on a queued message |
+| Queue above the message field | Compact one-line previews with **Direct now / Send now**, **Edit** and **Remove** icons; pause/resume beside the count |
 | **Ctrl+Enter** during native work | Steer Codex's current turn; interrupt and continue Claude in the same conversation |
 | **Copy to terminal** on a queued external message, or **Ctrl+Enter** | Copy a follow-up; paste into the agent input and use that CLI's send/queue controls |
 | **Push changes** | Authorize the agent to publish reusable changes to your configuration repository after validation; enabled by default |
@@ -87,6 +87,7 @@ URL. An empty branch uses the repository's default branch. See the
 | Settings | Configure the repository and permissions; inspect or refresh the installed agent's models |
 | **Continue conversation in terminal** | Resume an idle Codex/Claude conversation in its CLI |
 | New chat | Archive the current local conversation and start a fresh one |
+| Down arrow in the conversation | Shown while reading older messages; jump to the latest message and resume following replies |
 
 Escape closes the topmost question, settings panel or selector first. When an
 embedded terminal has focus, Escape goes to the CLI for its own controls.
@@ -98,13 +99,28 @@ and stops following when you scroll up to read. Scrolling past an edge moves
 the text slightly and springs back, without the GTK edge glow. The animation
 respects the desktop's reduced-motion setting.
 
+Messages render Markdown tables, clickable links, headings, lists, checklists,
+quotes, bold/italic/strikethrough text and code. Tables wrap their cells and wide
+tables scroll horizontally inside the conversation. Basic inline HTML formatting
+(such as `b`, `em`, `code`, `a` and `br`) is supported; other HTML is displayed as
+text. Images appear as links with their alternative text. Content does not run
+HTML scripts or fetch remote images. The panel is slightly taller, up to the
+available monitor height. The activity indicator is shown only during work and
+resumes animating when the panel is reopened; it does not show a percentage.
+See the [conversation and queue preview](docs/conversation.png).
+
 Follow-ups are saved locally per agent, repository, branch and conversation.
 **Stop**, a failed task or a disconnected client pauses automatic sending.
-After reopening the application, open the queue count and choose **Resume queue** to continue.
+After reopening the application, use **Resume queue** beside the inline count to continue.
 If delivery was not confirmed, review the conversation before editing and
 retrying that message. Editing preserves an existing composer draft; clear or
 queue the draft first. Send or remove pending messages before starting a new
 chat or changing repositories.
+Editing moves the queued text and its publication choice back into the main
+message field. The queue is hidden when empty and scrolls within a limited
+height when several messages are pending. Hover over a preview to read the full
+message and its publication choice; warning icons flag unconfirmed delivery or
+messages from another conversation.
 
 All supported agents have the local queue. Codex and Claude have automatic
 dispatch because their native connections report response boundaries. Other
@@ -194,5 +210,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for automated and visual tests,
 through [GitHub issues](https://github.com/JohanKRS/omarchy-settings-sync/issues).
 Screenshots use an example repository and contain no personal configuration.
 
-[MIT license](LICENSE). Independent community project; not an official Omarchy,
+[MIT license](LICENSE). The bundled [Mistune parser](plugin/_vendor/README.md)
+uses the BSD-3-Clause license. Independent community project; not an official Omarchy,
 OpenAI or Anthropic product.

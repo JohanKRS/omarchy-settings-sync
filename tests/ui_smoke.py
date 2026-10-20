@@ -94,7 +94,9 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             return result
         settle()
         baseline = geometry()
-        assert not window.queue_button.get_visible(), 'An empty queue should not add controls'
+        assert not window.queue_area.get_visible(), 'An empty queue should not add controls'
+        assert not window.spinner.get_visible(), 'Idle must not leave a static activity ring'
+        assert window.popup_bounds[3] <= 740
         assert window.stop_button.get_next_sibling() == window.send_button
         assert window.terminal_button.get_next_sibling() is None, 'Terminal belongs at the footer right edge'
         assert not window.stop_button.get_visible()
@@ -171,10 +173,12 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert ok and last_line.get_y() + last_line.get_height() <= window.scroll.get_height() - 8, ('Last line needs bottom breathing room', last_line.get_y(), last_line.get_height(), window.scroll.get_height(), adjustment.get_value(), adjustment.get_upper(), adjustment.get_page_size())
         # Reading older messages must not be interrupted by a streaming update.
         adjustment.set_value(0)
+        assert window.latest_button.get_visible()
         window.event({'method': 'item/agentMessage/delta', 'params': {'itemId': 'scroll-bottom', 'delta': '\nMore text'}})
         settle()
         assert adjustment.get_value() == 0 and not window.scroll.follow_tail
-        window.scroll.to_end(force=True)
+        window.latest_button.emit('clicked')
+        assert window.scroll.follow_tail and not window.latest_button.get_visible()
         window.scroll.pull(-100)
         assert -28 <= window.transcript.offset < 0
         wait(lambda: window.scroll.tick is None)
@@ -192,6 +196,15 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         wait(lambda: window.turn_id == "test-turn")
         backend.start.assert_called_once()
         assert backend.turn.call_args.args[2:] == ("sample-model", "high")
+        settle()
+        first_indicator = window.spinner.indicator
+        assert first_indicator is not None and first_indicator.get_spinning()
+        window.set_visible(False)
+        settle()
+        assert window.spinner.indicator is None
+        window.present()
+        settle()
+        assert window.spinner.indicator is not first_indicator and window.spinner.indicator.get_spinning()
         # Queued work waits for a completion; steering keeps the same turn.
         window.input.get_buffer().set_text('Run after the current response')
         assert window.composer_key(None, Gdk.KEY_Return, 0, 0)
@@ -199,18 +212,18 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert backend.turn.call_count == 1
         pending = window.outbox.for_agent('codex')[0]
         window.input.get_buffer().set_text('Do not overwrite this draft')
-        window.show_queue()
+        assert window.queue_area.get_visible() and not window.panels
+        assert window.queue_area.get_next_sibling() == window.input_area
         window.edit_queued(pending)
         assert pending in window.outbox.entries
         assert window.input.get_buffer().get_char_count() > 0
         window.input.get_buffer().set_text('')
-        window.show_queue()
         window.edit_queued(pending)
         assert pending not in window.outbox.entries and window.queue_paused
+        assert window.input.get_buffer().get_text(*window.input.get_buffer().get_bounds(), False) == pending['text']
+        assert not window.panels
         window.send(queued=True)
-        window.show_queue()
-        next(w for w in widgets(window.queue_panel) if isinstance(w, Gtk.Button) and
-             w.get_label() == tr('Resume queue')).emit('clicked')
+        window.queue_toggle.emit('clicked')
         assert not window.queue_paused and not window.panels
         window.input.get_buffer().set_text('Focus on the keyboard first')
         window.composer_key(None, Gdk.KEY_Return, 0, Gdk.ModifierType.CONTROL_MASK)
@@ -224,15 +237,58 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert not window.outbox.for_agent('codex')
         assert 'Run after the current response' in backend.turn.call_args.args[1]
         direction = window.queue_message('Promote this queued message')
-        window.show_queue()
-        next(w for w in widgets(window.queue_panel) if isinstance(w, Gtk.Button) and
-             w.get_label() == tr('Direct now')).emit('clicked')
+        next(w for w in widgets(window.queue_list) if isinstance(w, Gtk.Button) and
+             w.get_tooltip_text() == tr('Direct now')).emit('clicked')
         wait(lambda: not window.delivery_pending)
         assert not window.outbox.for_agent('codex') and direction not in window.outbox.entries
         assert window.busy and backend.turn.call_count == 2, 'Promoting a queue item must steer without duplicating it'
         window.event({"method": "turn/completed",
                       "params": {"threadId": "test-thread", "turn": {"status": "completed"}}})
         assert not window.busy
+        # The idle row sends directly; long queues stay bounded and previews
+        # remain one line even for multiline Markdown or very long messages.
+        assert not window.spinner.get_visible()
+        queued = [window.queue_message(f'Follow-up {n}\n' + 'Long preview ' * 70) for n in range(6)]
+        settle()
+        assert 0 < window.queue_scroll.get_height() <= 96
+        for preview in (w for w in widgets(window.queue_list) if isinstance(w, Gtk.Label)):
+            assert '\n' not in preview.get_text() and not preview.get_wrap()
+        before = backend.turn.call_count
+        next(w for w in widgets(window.queue_list) if isinstance(w, Gtk.Button) and
+             w.get_tooltip_text() == tr('Send now')).emit('clicked')
+        wait(lambda: not window.delivery_pending)
+        assert backend.turn.call_count == before + 1 and queued[0] not in window.outbox.entries
+        assert window.spinner.get_visible()
+        window.queue_paused = True
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        for entry in queued[1:]:
+            window.remove_queued(entry)
+        assert not window.queue_area.get_visible()
+        # Markdown remains source-backed while the UI uses native tables,
+        # selectable inline markup and links. Raw HTML is never executed.
+        markdown = ('## Choices\n\n**Bold** and *italic*, ~~old~~, `x < y`, '
+                    '[Docs](https://example.com?a=1&b=2) and <b>HTML</b><br>Next.\n\n'
+                    '| Option | Result |\n| --- | --- |\n'
+                    '| `~/Desktop` | **Visible** directory |\n'
+                    '| Hidden | A longer description that wraps within the cell. |\n\n'
+                    '- [x] Done\n- [ ] Pending\n\n> A quote\n\n'
+                    '```html\n<script>alert(1)</script>\n```')
+        body = window.add_message(tr('Agent'), markdown, 'markdown-fixture')
+        settle()
+        assert body.get_text() == markdown
+        cells = [w for w in widgets(body) if isinstance(w, Gtk.Label) and w.has_css_class('markdown-cell')]
+        assert len(cells) == 6 and cells[2].get_text() == '~/Desktop'
+        assert '<b>Visible</b>' in cells[3].get_label()
+        links = [w for w in widgets(body) if isinstance(w, Gtk.Label) and '<a href=' in w.get_label()]
+        assert links and 'https://example.com?a=1&amp;b=2' in links[0].get_label()
+        assert any(w.get_text() == '<script>alert(1)</script>' for w in widgets(body) if isinstance(w, Gtk.Label))
+        _, table_bounds = cells[0].get_parent().compute_bounds(window.popup_card)
+        assert table_bounds.get_x() + table_bounds.get_width() < window.popup_card.get_width()
+        # Streaming must append to raw Markdown rather than already rendered text.
+        window.add_message(tr('Agent'), '**Hel', 'markdown-stream')
+        window.event({'method': 'item/agentMessage/delta', 'params': {'itemId': 'markdown-stream', 'delta': 'lo**'}})
+        assert window.cards['markdown-stream'].get_text() == '**Hello**'
+        assert window.cards['markdown-stream'].get_first_child().get_label() == '<b>Hello</b>'
         # A rejected/unknown steering delivery must not mark the active turn idle.
         assert window.submit('Keep working after a failed steer')
         wait(lambda: not window.delivery_pending)

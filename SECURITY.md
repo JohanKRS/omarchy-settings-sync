@@ -51,6 +51,12 @@ disable hooks, exclude MCP configuration and use a temporary working directory.
 Normal agent conversations preserve the user's CLI profile. Bar status contains
 only open/waiting state, the monitor name and a heartbeat timestamp.
 
+Conversation rendering uses a bundled, pinned Markdown parser and native GTK
+widgets. Only a small inline HTML formatting allowlist becomes GTK markup;
+other HTML is shown literally. Scripts and remote image loading are not enabled.
+Clickable links allow HTTP(S), email and local files, opened only on activation
+through the desktop's normal handlers. Other URI schemes are not activated.
+
 ## Configuration synchronization
 
 The **Sync** button authorizes applying compatible configuration from the chosen
