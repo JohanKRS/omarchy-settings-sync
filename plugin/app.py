@@ -26,7 +26,7 @@ from i18n import tr
 from theme import Theme
 from context import begin_task, finish_task
 from catalog import MODEL_AGENTS, DISCOVERY_AGENTS, agent_executable, discover_models
-from claude_client import ClaudeClient
+from claude_client import ClaudeClient, PERMISSION_MODES as CLAUDE_PERMISSION_MODES
 from outbox import Outbox
 from chat_view import ChatView
 
@@ -342,12 +342,17 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.publish.set_active(self.settings.get("publish", True))
         self.publish.set_hexpand(True)
         row.append(self.publish)
-        self.stop_button = Gtk.Button(label=tr('Stop'), sensitive=False)
+        self.stop_button = Gtk.Button(icon_name="media-playback-stop-symbolic",
+                                      tooltip_text=tr('Stop'), sensitive=False, visible=False)
+        self.stop_button.add_css_class("flat")
+        self.stop_button.set_size_request(36, 36)
+        self.stop_button.update_property([Gtk.AccessibleProperty.LABEL], [tr('Stop')])
         self.stop_button.connect("clicked", lambda *_: self.stop())
         self.queue_button = Gtk.Button(label=tr('{count} queued', count=0))
         self.queue_button.add_css_class('flat')
         self.queue_button.connect("clicked", lambda *_: self.show_queue())
         row.append(self.queue_button)
+        row.append(self.stop_button)
         self.send_button = Gtk.Button(label=tr('Send'))
         self.send_button.add_css_class("suggested-action")
         self.send_button.set_size_request(104, 36)
@@ -368,14 +373,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.status.set_hexpand(True)
         bottom.append(self.status)
         bottom.append(self.spinner)
-        self.stop_button.set_size_request(104, 36)
-        self.stop_button.set_valign(Gtk.Align.CENTER)
         self.terminal_button = Gtk.Button(icon_name="utilities-terminal-symbolic", tooltip_text=tr('Open workspace terminal'))
         self.terminal_button.add_css_class("flat")
         self.terminal_button.set_size_request(36, 36)
         self.terminal_button.connect("clicked", lambda *_: self.open_terminal())
         bottom.append(self.terminal_button)
-        bottom.append(self.stop_button)
         outer.append(bottom)
 
     def control(self, title, widget, expand=False):
@@ -639,7 +641,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         elif agent in self.catalog_errors:
             text = tr('Could not refresh models. Retry or use a custom model.')
         elif self.agent_models():
-            text = tr('Models from your installed agent')
+            text = tr('Refresh models from your installed agent')
         else:
             text = tr('Use the agent default or choose a model in its terminal.')
         self.model_hint.set_text(text)
@@ -697,9 +699,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
         elif self.agent() == "claude":
             self.catalog_loaded("claude", models)
 
-    def mode_label(self):
-        return {"auto": tr('auto review'), "ask": tr('ask for approval'), "read": tr('read only')}.get(
-            self.settings.get("permissions", "auto"), tr('auto review'))
+    def permission_mode(self):
+        if self.agent() == 'claude':
+            mode = self.settings.get('claude_permissions', 'auto')
+            return mode if mode in CLAUDE_PERMISSION_MODES else 'default'
+        return self.settings.get('permissions', 'auto')
 
     def update_buttons(self):
         available = not self.busy and not self.terminal_pid and not self.delivery_pending
@@ -720,7 +724,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.input_area.set_sensitive(True)
         self.publish.set_sensitive(not running and not self.delivery_pending)
         self.stop_button.set_sensitive(running and not self.stopping)
-        self.stop_button.set_visible(True)
+        self.stop_button.set_visible(running)
         self.spinner.set_spinning(self.busy and not self.attention_waiting)
         self.update_queue()
 
@@ -1017,7 +1021,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.launch_external(prompt)
             return True
         model, effort = self.selection()
-        if self.agent() == "claude" and self.client and (self.client.model, self.client.effort) != (model, effort):
+        if self.agent() == "claude" and self.client and (
+                self.client.model, self.client.effort, self.client.permission_mode
+        ) != (model, effort, self.permission_mode()):
             self.close_client()
         self.add_message(tr('You'), text)
         self.busy = True
@@ -1036,7 +1042,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 ui(deliver)
             if self.agent() == "claude":
                 self.client = ClaudeClient(receive, executable=self.executables["claude"],
-                                           model=model, effort=effort, session_id=self.thread_id)
+                                           model=model, effort=effort, session_id=self.thread_id,
+                                           permission_mode=self.permission_mode())
             else:
                 self.client = CodexClient(receive)
         client = self.client
@@ -1057,7 +1064,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.ready = True
                 ui(self.connected_models, models)
             if not self.thread_loaded:
-                result = self.client.start_thread(model, self.settings.get("permissions", "auto"), self.thread_id)
+                result = self.client.start_thread(model, self.permission_mode(), self.thread_id)
                 previous_thread = self.thread_id
                 self.thread_id = result["thread"]["id"]
                 self.thread_loaded = True
@@ -1409,7 +1416,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return
         self.close_client()
         if self.agent() == "claude":
-            terminal([self.executables["claude"], "--resume=" + self.thread_id])
+            terminal([self.executables["claude"], "--permission-mode", self.permission_mode(),
+                      "--resume=" + self.thread_id])
         elif self.agent() == "codex":
             mode = self.settings.get("permissions", "auto")
             flags = (["--approve-for-me"] if mode == "auto" else
@@ -1486,15 +1494,19 @@ class SettingsWindow(Gtk.ApplicationWindow):
         content.append(self.model_info)
         repository = Gtk.Entry(placeholder_text=tr('owner/dotfiles'))
         repository.set_text(self.settings.get("repository", ""))
-        content.append(self.control(tr('Repository'), repository))
+        content.append(self.control(tr('Repository for saving your settings'), repository))
         branch = Gtk.Entry(placeholder_text=tr('Default branch'))
         branch.set_text(self.settings.get("branch", ""))
         content.append(self.control(tr('Branch'), branch))
-        mode = dropdown([tr('Auto review'), tr('Ask for approval'), tr('Read only')])
-        modes = ["auto", "ask", "read"]
-        current_mode = self.settings.get("permissions", "auto")
+        is_claude = self.agent() == 'claude'
+        modes = list(CLAUDE_PERMISSION_MODES) if is_claude else ["auto", "ask", "read"]
+        mode = dropdown([tr('Auto review'), tr('Ask for approval'), tr('Accept edits'), tr('Plan mode')]
+                        if is_claude else [tr('Auto review'), tr('Ask for approval'), tr('Read only')])
+        current_mode = self.permission_mode()
         mode.set_selected(modes.index(current_mode) if current_mode in modes else 0)
-        content.append(self.control(tr('Codex permissions'), mode))
+        permissions = self.control(tr('Claude permissions') if is_claude else tr('Codex permissions'), mode)
+        permissions.set_visible(self.agent() in NATIVE_AGENTS)
+        content.append(permissions)
         error_label = label("")
         error_label.set_visible(False)
         content.append(error_label)
@@ -1511,7 +1523,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 error_label.set_visible(True)
                 return
             changed = value != self.settings.get("repository") or branch_value != self.settings.get("branch", "")
-            self.settings.update(repository=value, branch=branch_value, permissions=modes[mode.get_selected()])
+            self.settings.update(repository=value, branch=branch_value)
+            if self.agent() in NATIVE_AGENTS:
+                self.settings['claude_permissions' if is_claude else 'permissions'] = modes[mode.get_selected()]
             self.thread_loaded = False
             if changed:
                 self.new_chat()

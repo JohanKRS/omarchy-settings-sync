@@ -49,6 +49,10 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         application = Gtk.Application(application_id="org.omarchy.AgentSettings.Test")
         application.register(None)
         window = SettingsWindow(application)
+        # Exercise handlers explicitly without consuming real desktop input
+        # or letting concurrent mouse/keyboard activity dismiss the fixture.
+        LayerShell.set_keyboard_mode(window, LayerShell.KeyboardMode.NONE)
+        window.set_can_target(False)
         window.present()
         assert window.vte is None, "Native conversations must not initialize VTE"
         assert json.loads(window.attention_file.read_text())["opened"]
@@ -79,16 +83,21 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         def geometry():
             result = []
             for widget in (window.popup_card, window.controls, window.agent_select,
-                           window.model_select, window.effort_select, window.input_area, window.stop_button):
+                           window.model_select, window.effort_select, window.input_area,
+                           window.terminal_button):
                 ok, bounds = widget.compute_bounds(window)
                 assert ok
                 result.append(tuple(round(v) for v in (bounds.get_x(), bounds.get_y(), bounds.get_width(), bounds.get_height())))
+            _, send = window.send_button.compute_bounds(window)
+            _, terminal = window.terminal_button.compute_bounds(window)
+            assert abs(send.get_x() + send.get_width() - terminal.get_x() - terminal.get_width()) < 1
             return result
         settle()
         baseline = geometry()
         assert not window.queue_button.get_visible(), 'An empty queue should not add controls'
-        assert window.terminal_button.get_next_sibling() == window.stop_button
-        assert window.stop_button.get_next_sibling() is None, 'Stop belongs at the right edge'
+        assert window.stop_button.get_next_sibling() == window.send_button
+        assert window.terminal_button.get_next_sibling() is None, 'Terminal belongs at the footer right edge'
+        assert not window.stop_button.get_visible()
         # Long names, different catalogs and unsupported efforts must not move
         # the controls, composer, panel edge or footer action.
         window.agent_select.set_selected(window.agent_ids.index("claude"))
@@ -112,21 +121,22 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         window.model_select.set_selected(window.model_values.index(None))
         assert window.panels
         window.popup_key(None, Gdk.KEY_Escape, 0, 0)
-        assert window.get_visible() and not window.panels
+        assert window.get_visible() and not window.panels, ('custom model dismissal', window.get_visible(), len(window.panels))
         assert window.selection() == ("opus", "max"), "Canceling a custom model preserves the previous selection"
         window.busy = True
         window.status.set_text("Very long running command " * 40)
         window.update_buttons()
         settle()
-        assert geometry() == baseline, "Long status text and Stop must not resize the panel"
+        assert geometry() == baseline, ("Long status text and Stop must not resize the panel", baseline, geometry())
+        assert window.stop_button.get_visible() and window.stop_button.get_sensitive()
         window.busy = False
         window.update_buttons()
-        assert window.stop_button.get_visible() and not window.stop_button.get_sensitive()
+        assert not window.stop_button.get_visible() and not window.stop_button.get_sensitive()
         window.agent_select.set_selected(window.agent_ids.index("codex"))
         assert window.selection() == ("sample-model", "high")
         discover.assert_called_once()
         window.model_select.get_first_child().set_active(True)
-        settle()
+        wait(lambda: any(isinstance(w, Gtk.Popover) and w.get_visible() for w in widgets(window.model_select)))
         window.popup_key(None, Gdk.KEY_Escape, 0, 0)
         assert window.get_visible(), "Escape closes the dropdown before the panel"
         replies = []
@@ -278,9 +288,22 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             return client
         window.agent_select.set_selected(window.agent_ids.index("claude"))
         window.model_select.set_selected(window.model_values.index("opus"))
+        # Permission choices belong to the selected agent, persist to disk and
+        # must reach both a new Claude process and the terminal resume path.
+        window.settings['permissions'] = 'read'
+        window.setup()
+        labels = [w.get_text() for w in widgets(window.setup_panel) if isinstance(w, Gtk.Label)]
+        assert tr('Claude permissions') in labels and tr('Codex permissions') not in labels
+        permission_select = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.DropDown))
+        permission_select.set_selected(1)
+        next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Button) and
+             w.get_label() == tr('Use repository')).emit('clicked')
+        saved = json.loads(window.settings_file.read_text())
+        assert saved['claude_permissions'] == 'default' and saved['permissions'] == 'read'
         with patch("app.ClaudeClient", side_effect=fake_claude):
             assert window.submit("Ask a structured question")
             wait(lambda: bool(window.question_windows))
+            assert clients[-1].permission_mode == 'default'
             assert window.busy and window.attention_waiting
             assert json.loads(window.attention_file.read_text())["waiting"]
             assert not window.spinner.get_spinning()
@@ -318,8 +341,17 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             assert not json.loads(window.attention_file.read_text())["waiting"]
             response = json.loads(window.messages[-1]["text"])
             assert response["updatedInput"]["answers"] == {"Which color?": "Blue", "Which extras?": "One, Two"}
+            previous_client = window.client
+            window.setup()
+            permission_select = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.DropDown))
+            permission_select.set_selected(3)
+            next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Button) and
+                 w.get_label() == tr('Use repository')).emit('clicked')
             assert window.submit('Task to redirect')
             wait(lambda: bool(window.question_windows) and not window.delivery_pending)
+            assert window.client is not previous_client and window.client.permission_mode == 'plan'
+            assert window.thread_id == session_id
+            assert window.settings['permissions'] == 'read'
             old_turn, old_pid = window.turn_id, window.client.process.pid
             window.queue_message('Later follow-up')
             assert window.steer('New direction in the same conversation')
@@ -331,6 +363,11 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             wait(lambda: not window.busy)
             assert window.queue_paused and len(window.outbox.for_agent('claude')) == 1
             window.remove_queued(window.outbox.for_agent('claude')[0])
+            with patch('app.terminal') as terminal:
+                window.resume_in_terminal()
+                terminal.assert_called_once_with([window.executables['claude'], '--permission-mode', 'plan',
+                                                  '--resume=' + session_id])
+            window.present()
             window.agent_select.set_selected(window.agent_ids.index("codex"))
             assert window.thread_id == "test-thread"
             window.agent_select.set_selected(window.agent_ids.index("claude"))

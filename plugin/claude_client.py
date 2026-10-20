@@ -10,15 +10,20 @@ import uuid
 from catalog import normalize_claude_models
 from core import CodexClient, RpcError, paths
 
+PERMISSION_MODES = ('auto', 'default', 'acceptEdits', 'plan')
+
 
 class ClaudeClient(CodexClient):
     def __init__(self, event, *, executable="claude", model="", effort="", session_id=None,
-                 command=None, workspace=None, log=None):
+                 permission_mode="auto", command=None, workspace=None, log=None):
+        if permission_mode not in PERMISSION_MODES:
+            raise ValueError('Unsupported Claude permission mode: ' + str(permission_mode))
         self.session_id = session_id or str(uuid.uuid4())
         self.model, self.effort = model, effort
+        self.permission_mode = permission_mode
         args = [executable, "--print", "--input-format", "stream-json",
                 "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-                "--permission-prompt-tool", "stdio", "--permission-mode", "auto",
+                "--permission-prompt-tool", "stdio", "--permission-mode", permission_mode,
                 "--setting-sources", "user,project,local",
                 ("--resume=" if session_id else "--session-id=") + self.session_id]
         if model:

@@ -82,6 +82,24 @@ class ClaudeTest(unittest.TestCase):
         self.assertNotIn("--dangerously-skip-permissions", client.command)
         self.assertNotIn("--strict-mcp-config", client.command)
 
+    def test_permission_modes_reach_new_and_resumed_sessions(self):
+        for mode in ('auto', 'default', 'acceptEdits', 'plan'):
+            for session_id in (None, 'existing-session'):
+                with self.subTest(mode=mode, session_id=session_id):
+                    client = ClaudeClient(lambda _: None, permission_mode=mode, session_id=session_id)
+                    index = client.command.index('--permission-mode')
+                    self.assertEqual(client.command[index + 1], mode)
+                    self.assertEqual(client.permission_mode, mode)
+                    self.assertIn('stdio', client.command)
+                    self.assertNotIn('--dangerously-skip-permissions', client.command)
+
+    def test_invalid_permission_modes_do_not_start_a_process(self):
+        with patch('claude_client.subprocess.Popen') as process:
+            for mode in ('unknown', 'bypassPermissions', None):
+                with self.assertRaises(ValueError):
+                    ClaudeClient(lambda _: None, permission_mode=mode)
+            process.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

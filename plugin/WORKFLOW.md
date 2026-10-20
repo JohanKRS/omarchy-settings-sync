@@ -141,8 +141,8 @@ suffice. Preserve an existing layout unless reorganization was requested.
 
 Preserve the agent profile's tools and connections. Native Codex uses
 `workspace-write` with automatic approval review by default; questions and
-permissions are handled in the panel. Native Claude uses its CLI's `auto`
-permission mode and structured permission callbacks. Other agents run their
+permissions are handled in the panel. Native Claude uses the permission mode
+selected in Settings and structured permission callbacks. Other agents run their
 interactive CLIs with their own authentication and permission controls.
 
 Do not disable sandboxing, review, policies or controls to bypass a block.

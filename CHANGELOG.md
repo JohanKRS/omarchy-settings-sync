@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.6 — Unreleased
+
+- Show Stop as an icon immediately before Send/Queue only while a task runs.
+- Align the footer's terminal control with the right edge of Send/Queue.
+- Add a separate Claude permission selector for auto review, manual approval,
+  accepting edits and planning. Apply it to new/resumed sessions and terminal
+  handoffs, preserving each agent's selection independently.
+- Make model refresh and the configuration repository's purpose explicit in
+  the settings labels.
+
 ## 0.1.5 — Unreleased
 
 - Restore the shared hover feedback on flat controls, including Sync, model

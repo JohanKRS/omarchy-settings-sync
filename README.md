@@ -82,7 +82,7 @@ URL. An empty branch uses the repository's default branch. See the
 | **Push changes** | Authorize the agent to publish reusable changes to your configuration repository after validation; enabled by default |
 | Agent, model, effort | Choose before starting; selections are remembered per agent |
 | **?** in the bar | Codex or Claude is waiting for an answer or permission |
-| **Stop** | Interrupt a native conversation, or send Ctrl+C to an embedded CLI |
+| Stop icon, beside Send/Queue while working | Interrupt a native conversation, or send Ctrl+C to an embedded CLI |
 | Terminal icon | Open a companion shell in the workspace, including during a task |
 | Settings | Configure the repository and permissions; inspect or refresh the installed agent's models |
 | **Continue conversation in terminal** | Resume an idle Codex/Claude conversation in its CLI |
@@ -128,7 +128,11 @@ Their native support for mid-response messages varies by CLI and version.
 Codex and Claude use your local CLI login, skills and MCP configuration. They do
 not inherit connections exclusive to another app. Codex defaults to
 `workspace-write` with automatic approval review; manual approval and read-only
-modes are available. Claude uses its CLI's `auto` permission mode. Other CLIs
+modes are available. Claude has its own permission selector: auto review,
+ask for approval, accept edits or plan mode. Choices are saved separately for
+each native agent and take effect on the next request, including a resumed
+conversation or terminal handoff. Existing Claude configurations keep `auto`
+until changed. Plan mode prepares a plan; it is not a filesystem sandbox. Other CLIs
 keep their own permission interfaces, and their questions do not set the bar's
 question indicator. See [security and data handling](SECURITY.md).
 

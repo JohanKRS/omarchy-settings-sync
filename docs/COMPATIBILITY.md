@@ -75,6 +75,16 @@ accounts have not been exercised in this environment.
 
 ## Follow-up support
 
+The 0.1.6 update adds separate native Claude permission settings using
+`--permission-mode auto|default|acceptEdits|plan`. Protocol tests check launch
+arguments and invalid modes; the graphical test covers independent persistence,
+changing modes between turns while retaining the session, and terminal resume.
+The UI also checks that Stop is visible only during work and that the terminal
+and Send/Queue controls share their right edge. The 31 portable tests and the
+extended graphical test passed with the installed CLI versions listed above.
+These protocol checks use fixtures, rather than live model calls. Mode semantics
+follow the [Claude permission documentation](https://code.claude.com/docs/en/permission-modes).
+
 | Agent integration | Queue | Direction during work |
 | --- | --- | --- |
 | Codex app-server | Local durable queue, automatically dispatched after `turn/completed` | `turn/steer` with `expectedTurnId` |

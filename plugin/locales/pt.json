@@ -88,7 +88,6 @@
   "Agent not installed": "Agente não instalado",
   "Loading models…": "Carregando modelos…",
   "Could not refresh models. Retry or use a custom model.": "Não foi possível atualizar os modelos. Tente novamente ou use um modelo personalizado.",
-  "Models from your installed agent": "Modelos do agente instalado",
   "Use the agent default or choose a model in its terminal.": "Use o padrão do agente ou escolha o modelo no terminal dele.",
   "Effort is managed by this agent.": "O esforço é controlado pelo próprio agente.",
   "Agent disconnected. Send again to reconnect.": "O agente desconectou. Envie novamente para reconectar.",
@@ -123,5 +122,10 @@
   "Enter: queue. Ctrl+Enter: send now. Shift+Enter: new line.": "Enter: enfileirar. Ctrl+Enter: enviar agora. Shift+Enter: nova linha.",
   "Enter: send. Shift+Enter: new line.": "Enter: enviar. Shift+Enter: nova linha.",
   "Direct now": "Direcionar agora",
-  "Send now": "Enviar agora"
+  "Send now": "Enviar agora",
+  "Refresh models from your installed agent": "Atualizar modelos do agente instalado",
+  "Repository for saving your settings": "Repositório para salvar as configurações",
+  "Claude permissions": "Permissões do Claude",
+  "Accept edits": "Aceitar edições",
+  "Plan mode": "Modo de planejamento"
 }

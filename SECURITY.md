@@ -27,8 +27,10 @@ maintenance guarantee.
   gtk4-layer-shell` in a visible terminal. Package installation may require
   administrator authentication through Omarchy's normal flow.
 - Codex uses `workspace-write` with automatic approval review by default. Manual
-  approval and read-only modes are available. Claude uses `--permission-mode auto`
-  with a stdio permission callback. The panel does not pass bypass/yolo flags.
+  approval and read-only modes are available. Claude defaults to `--permission-mode auto`
+  with a stdio permission callback. Its own selector also offers manual approval,
+  accepting edits and plan mode; choices are applied to new/resumed sessions.
+  The panel does not pass bypass/yolo flags.
 - Automatic review can approve actions without a separate manual question.
   Agents and configured MCP servers may modify files, use the network or request
   elevated operations according to their own profile and policy.
