@@ -851,7 +851,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             row.append(preview)
             if native:
                 title = tr('Direct now') if self.busy else tr('Send now')
-                now = self.queue_action('go-jump-symbolic' if self.busy else 'mail-send-symbolic', title,
+                now = self.queue_action('go-up-symbolic', title,
                                         lambda _, e=entry: self.send_queued_now(e))
                 if self.busy and self.agent() == 'claude':
                     now.set_tooltip_text(title + '\n' + tr('Interrupt and continue in the same conversation.'))
