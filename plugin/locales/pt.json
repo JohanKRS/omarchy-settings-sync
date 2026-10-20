@@ -128,5 +128,10 @@
   "Claude permissions": "Permissões do Claude",
   "Accept edits": "Aceitar edições",
   "Plan mode": "Modo de planejamento",
-  "Jump to latest": "Ir para a mensagem mais recente"
+  "Jump to latest": "Ir para a mensagem mais recente",
+  "Reply now with this option": "Responder agora com esta opção",
+  "Copy request": "Copiar pedido",
+  "Copy the request, then paste it into the agent input and send.": "Copie o pedido, cole no campo de mensagem do agente e envie.",
+  "Opened in terminal. Copy and paste the request.": "Aberto no terminal. Copie e cole o pedido.",
+  "Copy and paste the request into {agent}.": "Copie e cole o pedido no {agent}."
 }

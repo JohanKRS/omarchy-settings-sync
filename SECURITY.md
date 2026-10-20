@@ -51,6 +51,13 @@ disable hooks, exclude MCP configuration and use a temporary working directory.
 Normal agent conversations preserve the user's CLI profile. Bar status contains
 only open/waiting state, the monitor name and a heartbeat timestamp.
 
+Native Codex and Claude requests travel through subprocess stdin. External CLI
+launches never include the initial request or configuration context in process
+arguments or added environment variables. The user explicitly copies the
+request from the panel and pastes it into the CLI's own input. The panel does not
+automatically type into a terminal or answer its permission prompts. Copying
+uses the desktop clipboard and is subject to the user's clipboard history.
+
 Conversation rendering uses a bundled, pinned Markdown parser and native GTK
 widgets. Only a small inline HTML formatting allowlist becomes GTK markup;
 other HTML is shown literally. Scripts and remote image loading are not enabled.

@@ -75,6 +75,19 @@ accounts have not been exercised in this environment.
 
 ## Follow-up support
 
+The 0.1.8 update adds clickable alternatives to explicit choice questions in
+native Codex/Claude conversation messages. Parser tests cover numbered, bulleted
+and lettered alternatives, supported languages, formatting and ordinary lists
+that must stay text. Graphical fixtures cover active Codex direction, idle
+continuation, Claude interrupt-and-continue, draft/queue preservation, repeated
+clicks and unknown delivery. Structured question dialogs are unchanged.
+
+External agents now start interactively without prompt-bearing arguments; the
+user copies the initial request and pastes/sends it through the CLI input. The
+same behavior applies when VTE is unavailable. Fixtures cover every adapter,
+both launch paths, exact copied content and failed terminal launches. These
+checks verify the plugin's transport and UI, not live third-party accounts.
+
 The 0.1.7 update keeps the queue inline above the composer, limits its height and
 renders message formatting with native GTK widgets. Its 38 portable tests cover
 tables, nested formatting, escaping, links and partial streaming input as well as

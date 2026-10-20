@@ -22,6 +22,14 @@ for line in sys.stdin:
             send({"type": "result", "is_error": True, "result": "Interrupted"})
     elif message["type"] == "user":
         send({"type": "system", "subtype": "init", "session_id": message["session_id"]})
+        text = message['message']['content']
+        if 'Show inline alternatives' in text or 'Which color?\nBlue' in text:
+            choosing = 'Show inline alternatives' in text
+            send({'type': 'assistant', 'message': {'id': 'inline-question' if choosing else 'inline-answer',
+                  'content': [{'type': 'text', 'text': 'Which color?\n\n1. Blue\n2. Green' if choosing else 'Received inline answer'}]}})
+            if not choosing:
+                send({'type': 'result', 'subtype': 'success', 'is_error': False})
+            continue
         send({"type": "control_request", "request_id": "question", "request": {
             "subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": {"questions": [
                 {"question": "Which color?", "header": "Color", "options": [{"label": "Blue"}, {"label": "Green"}]},

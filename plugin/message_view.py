@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from html import escape
+import re
 
 from gi.repository import Gtk, Pango
 
 from message_markup import html_markup, inline_markup, parse_markdown
+from message_choices import choice_groups
+from i18n import tr
 
 
 def markup_label(markup, *, xalign=0):
@@ -17,25 +20,64 @@ def markup_label(markup, *, xalign=0):
 
 
 class MessageBody(Gtk.Box):
-    def __init__(self, text):
+    def __init__(self, text, *, on_choice=None, complete=True, choices_answered=False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True)
         self.text = None
+        self.on_choice = on_choice
+        self.complete = complete
+        self.choices_answered = choices_answered
+        self.choices_enabled = False
+        self.choice_buttons = []
         self.set_text(text)
 
     def get_text(self):
         # Streaming appends to the original Markdown, never the rendered text.
         return self.text
 
-    def set_text(self, text):
-        if text == self.text:
+    def set_text(self, text, *, complete=None):
+        complete = self.complete if complete is None else complete
+        if text == self.text and complete == self.complete:
             return
         self.text = text
+        self.complete = complete
+        self.choice_buttons = []
         while self.get_first_child():
             self.remove(self.get_first_child())
-        self.render_blocks(parse_markdown(text), self)
+        tokens = parse_markdown(text)
+        groups = choice_groups(tokens) if self.on_choice and complete else {}
+        self.render_blocks(tokens, self, groups)
 
-    def render_blocks(self, tokens, container):
-        for token in tokens:
+    def set_choices_enabled(self, enabled):
+        self.choices_enabled = enabled and not self.choices_answered
+        for button in self.choice_buttons:
+            button.set_sensitive(self.choices_enabled)
+
+    def choice_list(self, group):
+        listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        if group.intro:
+            listing.append(markup_label(inline_markup(group.intro)))
+        for choice in group.choices:
+            button = Gtk.Button(hexpand=True)
+            button.add_css_class('conversation-choice')
+            # Links inside an option are displayed as text: activating the row
+            # has exactly one meaning, sending the selected answer.
+            markup = re.sub(r'</?a(?:\s[^>]*)?>', '', inline_markup(choice.tokens))
+            body = markup_label(escape(choice.marker + ' ') + markup)
+            body.set_selectable(False)
+            button.set_child(body)
+            button.set_tooltip_text(tr('Reply now with this option'))
+            button.set_sensitive(self.choices_enabled and not self.choices_answered)
+            button.connect('clicked', lambda _, q=group.question, a=choice.text:
+                           self.on_choice(q, a) if self.choices_enabled and not self.choices_answered else None)
+            self.choice_buttons.append(button)
+            listing.append(button)
+        return listing
+
+    def render_blocks(self, tokens, container, groups=None):
+        for index, token in enumerate(tokens):
+            if groups and index in groups:
+                container.append(self.choice_list(groups[index]))
+                continue
             kind = token['type']
             children = token.get('children', [])
             if kind in {'paragraph', 'block_text', 'heading'}:

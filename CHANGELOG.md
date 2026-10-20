@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.8 — 2026-10-20
+
+- Make alternatives in explicit conversation choice questions clickable for
+  native Codex and Claude. Send the question and chosen answer immediately,
+  preserving composer drafts and queued work. Ignore incomplete streaming
+  options, older messages and repeated clicks. Structured question dialogs
+  keep their existing behavior.
+- Keep initial requests and configuration context out of every external CLI's
+  process arguments. Open the interactive CLI without a prompt and provide
+  **Copy request** for manual paste and send, including the standalone terminal
+  fallback. Native Codex/Claude continue sending requests over stdin.
+- Cover conversation choices, native direction, external launch arguments,
+  manual copying and launch failures with parser and graphical regression tests.
+
 ## 0.1.7 — 2026-10-20
 
 - Move queued messages above the composer into bounded, scrollable one-line

@@ -122,6 +122,9 @@ class Theme:
             .queue-area label {{ font-size: {max(1, size - 1)}px; }}
             button.queue-action {{ min-height: 24px; min-width: 24px; padding: 1px; }}
             .markdown-heading {{ font-size: {max(1, size + 1)}px; }}
+            button.conversation-choice {{ padding: 8px 10px; border-color: alpha({accent}, .3); }}
+            button.conversation-choice:hover:not(:disabled) {{ background: alpha({accent}, .12); }}
+            button.conversation-choice:disabled {{ opacity: .75; }}
             .markdown-code {{ background: alpha({fg}, .04); padding: 8px; }}
             .markdown-quote {{ border-left: 2px solid alpha({accent}, .5); padding-left: 10px; }}
             .markdown-cell {{ padding: 7px; border-right: 1px solid alpha({fg}, .16);

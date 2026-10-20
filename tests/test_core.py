@@ -33,18 +33,32 @@ class ConfigurationTest(unittest.TestCase):
         create = make_prompt("", repository="sample/new", create=True)
         self.assertIn("PRIVADO", create)
 
-    def test_all_adapters_keep_prompt_as_one_literal_argument(self):
-        prompt = "Text 'quoted' $(touch /tmp/should-not-exist)\nSecond line"
+    def test_all_adapters_launch_interactively_without_a_prompt_channel_in_argv(self):
+        expected = {
+            'codex': ['codex', '--approve-for-me'],
+            'claude': ['claude', '--permission-mode', 'auto'],
+            'hermes': ['hermes', 'chat', '--tui'],
+            'cursor-agent': ['cursor-agent', 'agent'],
+            'openclaw': ['omarchy-launch-openclaw', '--tui'],
+        }
         for agent in AGENTS:
             with self.subTest(agent=agent):
-                cmd = external_command(agent, prompt)
-                self.assertIn(prompt if agent != "hermes" else "--query=" + prompt, cmd)
+                cmd = external_command(agent)
+                self.assertEqual(cmd, expected.get(agent, [agent]))
                 self.assertFalse(any(x in cmd for x in ("--yolo", "--dangerously-skip-permissions", "--allow-all")))
-        cmd = external_command("claude", prompt, "opus", "high")
+                # The builder cannot accept a private prompt, even accidentally.
+                with self.assertRaises(TypeError):
+                    external_command(agent, 'private request')
+        cmd = external_command("claude", model="opus", effort="high")
         self.assertEqual(cmd[cmd.index("--model") + 1], "opus")
         self.assertEqual(cmd[cmd.index("--effort") + 1], "high")
         with self.assertRaises(ValueError):
-            external_command("unknown", prompt)
+            external_command("unknown")
+        self.assertEqual(external_command('opencode', model='model', effort='high'),
+                         ['opencode', '--model', 'model', '--variant', 'high'])
+        for agent in ('pi', 'omp'):
+            self.assertEqual(external_command(agent, model='model', effort='high'),
+                             [agent, '--model', 'model', '--thinking', 'high'])
 
     def test_private_state_and_read_only_permissions(self):
         with tempfile.TemporaryDirectory() as d:

@@ -88,6 +88,15 @@ xdg-user-dir DESKTOP
         window.scroll.get_vadjustment().set_value(110)
         settle()
         subprocess.run(['grim', '-g', region, str(ROOT / 'docs/conversation.png')], check=True)
+        window.add_message('Agent', '''Which desktop folder do you prefer?
+
+1. **Desktop** — Keep shortcuts in `~/Desktop`.
+2. **Hidden folder** — Store shortcuts under `~/.local/share/desktop`.
+3. **Current setup** — Keep the existing location.
+''')
+        window.scroll.to_end(force=True)
+        settle()
+        subprocess.run(['grim', '-g', region, str(ROOT / 'docs/choices.png')], check=True)
         # Verify the native spinner changes frames after hiding/reopening the
         # panel, the lifecycle that used to leave GTK's SVG paused.
         window.set_visible(False)
@@ -108,4 +117,4 @@ xdg-user-dir DESKTOP
         GLib.source_remove(window.theme_timer)
         GLib.source_remove(window.attention_timer)
         window.destroy()
-        print('Captured preview.png, docs/questions.png and docs/conversation.png; spinner animates after reopening')
+        print('Captured preview.png, docs/questions.png, docs/conversation.png and docs/choices.png; spinner animates after reopening')

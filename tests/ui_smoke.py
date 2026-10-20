@@ -289,15 +289,64 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         window.event({'method': 'item/agentMessage/delta', 'params': {'itemId': 'markdown-stream', 'delta': 'lo**'}})
         assert window.cards['markdown-stream'].get_text() == '**Hello**'
         assert window.cards['markdown-stream'].get_first_child().get_label() == '<b>Hello</b>'
+        # Only completed, current agent choices are actionable. A click directs
+        # the existing turn, bypasses the queue and leaves the composer alone.
+        assert window.submit('Offer inline options')
+        wait(lambda: not window.delivery_pending)
+        choice_text = 'Qual opção você prefere?\n\n1. **Azul** — manter a configuração.\n2. Verde'
+        window.event({'method': 'item/agentMessage/delta', 'params': {'itemId': 'inline', 'delta': choice_text}})
+        body = window.cards['inline']
+        assert not body.choice_buttons, 'Streaming options must not submit incomplete answers'
+        window.event({'method': 'item/completed', 'params': {'item': {
+            'id': 'inline', 'type': 'agentMessage', 'text': choice_text}}})
+        assert len(body.choice_buttons) == 2 and body.choice_buttons[0].get_sensitive()
+        window.input.get_buffer().set_text('Preserve this draft')
+        queued = window.queue_message('A later task')
+        window.queue_paused = True
+        before = backend.steer.call_count
+        body.choice_buttons[0].emit('clicked')
+        body.choice_buttons[1].emit('clicked')
+        wait(lambda: not window.delivery_pending)
+        assert backend.steer.call_count == before + 1
+        backend.steer.assert_called_with('test-thread', 'test-turn',
+                                         'Qual opção você prefere?\nAzul — manter a configuração.')
+        assert window.busy and window.outbox.for_agent('codex') == [queued]
+        assert window.input.get_buffer().get_text(*window.input.get_buffer().get_bounds(), False) == 'Preserve this draft'
+        assert not any(b.get_sensitive() for b in body.choice_buttons)
+        assert window.message_entries['inline']['choices_answered']
+        assert any(m.get('choices_answered') for m in json.loads(window.session_file.read_text()))
+        window.remove_queued(queued)
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        window.input.get_buffer().set_text('')
+        # Idle answers start a new turn in the existing thread; old messages,
+        # user-authored lists and structured permission requests cannot redirect.
+        old = window.add_message(tr('Agent'), choice_text, 'old-choice')
+        idle = window.add_message(tr('Agent'), 'Which color?\n\n- Blue\n- Green', 'idle-choice')
+        assert not old.choice_buttons[0].get_sensitive()
+        before = backend.turn.call_count
+        old.choice_buttons[0].emit('clicked')
+        assert backend.turn.call_count == before
+        window.request_from_agent({'id': 'block-choice', 'method': 'item/commandExecution/requestApproval',
+                                   'params': {'command': 'test', 'availableDecisions': ['decline']}})
+        assert not idle.choice_buttons[0].get_sensitive()
+        window.panels[-1].on_close()
+        idle.choice_buttons[1].emit('clicked')
+        wait(lambda: not window.delivery_pending)
+        assert backend.turn.call_count == before + 1 and 'Which color?\nGreen' in backend.turn.call_args.args[1]
+        assert not window.outbox.for_agent('codex')
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        assert not window.add_message(tr('You'), choice_text).choice_buttons
         # A rejected/unknown steering delivery must not mark the active turn idle.
         assert window.submit('Keep working after a failed steer')
         wait(lambda: not window.delivery_pending)
         backend.steer.side_effect = RuntimeError('Simulated steering timeout')
-        assert window.steer('A message whose delivery is unknown')
+        uncertain = window.add_message(tr('Agent'), 'Which option?\n\n- First\n- Second')
+        uncertain.choice_buttons[0].emit('clicked')
         wait(lambda: not window.delivery_pending)
         assert window.busy and window.queue_paused
         kept = window.outbox.for_agent('codex')[0]
         assert kept['state'] == 'uncertain'
+        assert kept['text'] == 'Which option?\nFirst' and not uncertain.choice_buttons[0].get_sensitive()
         window.remove_queued(kept)
         backend.steer.side_effect = None
         window.queue_message('Keep this after stopping')
@@ -397,6 +446,20 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             assert not json.loads(window.attention_file.read_text())["waiting"]
             response = json.loads(window.messages[-1]["text"])
             assert response["updatedInput"]["answers"] == {"Which color?": "Blue", "Which extras?": "One, Two"}
+            assert window.submit('Show inline alternatives')
+            wait(lambda: window.reply_body and window.reply_body.choice_buttons and not window.delivery_pending)
+            inline_body = window.reply_body
+            old_turn, old_pid = window.turn_id, window.client.process.pid
+            queued = window.queue_message('After choosing a color')
+            window.queue_paused = True
+            inline_body.choice_buttons[0].emit('clicked')
+            inline_body.choice_buttons[1].emit('clicked')
+            wait(lambda: not window.busy and not window.delivery_pending)
+            assert window.client.process.pid == old_pid and window.thread_id == session_id
+            assert window.messages[-1]['text'] == 'Received inline answer'
+            assert window.outbox.for_agent('claude') == [queued]
+            assert not inline_body.choice_buttons[0].get_sensitive()
+            window.remove_queued(queued)
             previous_client = window.client
             window.setup()
             permission_select = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.DropDown))
@@ -443,9 +506,34 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         window.close_client()
         # Every external adapter can keep and copy follow-ups while its PTY runs.
         # Copying must never inject Enter, text, or permission answers into a PTY.
+        terminal_placeholder = Gtk.Box()
+        window.content.add_named(terminal_placeholder, 'terminal')
         for agent in AGENTS.keys() - {'codex', 'claude'}:
             window.executables[agent] = sys.executable
             window.agent_select.set_selected(window.agent_ids.index(agent))
+            secret = "PRIVATE-REQUEST-" + agent + "\n' $(never-run) ç --option"
+            window.vte = Mock()
+            with patch('app.Vte', Mock()):
+                assert window.launch_external(secret)
+            launch = window.vte.spawn_async.call_args.kwargs
+            assert not any(secret in arg or 'PRIVATE-REQUEST-' in arg for arg in launch['argv'] + launch['envv'])
+            assert '--prompt' not in launch['argv'] and '--message' not in launch['argv']
+            launch['callback'](window.vte, 12345, None)
+            assert window.external_prompt_area.get_visible()
+            with patch.object(window, 'copy_to_terminal') as copy:
+                window.copy_request_button.emit('clicked')
+                copy.assert_called_once_with(secret)
+            window.vte.feed_child.assert_not_called()
+            window.terminal_pid = None
+            launch['callback'](window.vte, -1, RuntimeError('Fixture VTE failure'))
+            assert not window.busy and window.external_prompt == secret
+            with patch.object(window, 'ensure_vte', return_value=False), patch('app.terminal') as terminal:
+                assert window.launch_external(secret)
+                assert not any('PRIVATE-REQUEST-' in arg for arg in terminal.call_args.args[0])
+                assert window.external_prompt == secret
+            with patch.object(window, 'ensure_vte', return_value=False), patch('app.terminal', side_effect=OSError('Launch failed')):
+                assert not window.launch_external(secret)
+                assert not window.busy
             window.terminal_pid = 12345
             window.vte = Mock()
             window.update_buttons()
@@ -459,6 +547,7 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             window.terminal_pid = None
             window.remove_queued(window.outbox.for_agent(agent)[0])
             window.vte = None
+        window.content.remove(terminal_placeholder)
         if window.ensure_vte():
             window.agent_select.set_selected(window.agent_ids.index("claude"))
             with patch("app.external_command", return_value=[sys.executable, "-c", "import time; print('terminal-ok',flush=True); time.sleep(.4)"]), patch("app.shutil.which", return_value=sys.executable):

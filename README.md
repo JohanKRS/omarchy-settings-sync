@@ -78,6 +78,8 @@ URL. An empty branch uses the repository's default branch. See the
 | **Enter / Send / Queue** | The same button sends when idle and queues while an agent is working |
 | Queue above the message field | Compact one-line previews with **Direct now / Send now**, **Edit** and **Remove** icons; pause/resume beside the count |
 | **Ctrl+Enter** during native work | Steer Codex's current turn; interrupt and continue Claude in the same conversation |
+| Alternatives in a Codex/Claude conversation | Click an option to answer immediately, preserving the composer draft and queued messages |
+| **Copy request** for an external agent | Copy the initial request and context; paste into the CLI's message input and send |
 | **Copy to terminal** on a queued external message, or **Ctrl+Enter** | Copy a follow-up; paste into the agent input and use that CLI's send/queue controls |
 | **Push changes** | Authorize the agent to publish reusable changes to your configuration repository after validation; enabled by default |
 | Agent, model, effort | Choose before starting; selections are remembered per agent |
@@ -93,6 +95,15 @@ Escape closes the topmost question, settings panel or selector first. When an
 embedded terminal has focus, Escape goes to the CLI for its own controls.
 Otherwise, Escape or a click outside hides the panel. Hiding an active task does not stop it.
 Questions support options and free text; Claude also supports multiple selections.
+In the native conversation, explicit choice questions with numbered, bulleted
+or A)/B) alternatives become clickable after the message finishes streaming.
+The latest agent message can be answered once this way: the question and full
+selected alternative are sent immediately, using the existing direction flow
+while working or a new turn in the same conversation when idle. Detection uses
+explicit selection language in English, Portuguese or Spanish; ordinary lists,
+code, quotes and checklists stay text. You can always answer in the message field.
+Structured question and permission dialogs retain their existing controls.
+See the [clickable conversation choices](docs/choices.png).
 Shift+Enter inserts a newline in the panel's message field.
 The conversation follows newly laid-out text without clipping the final line,
 and stops following when you scroll up to read. Scrolling past an edge moves
@@ -130,6 +141,14 @@ The copied message stays in the panel queue until you remove it. The panel
 cannot detect those CLIs' response boundaries and does not automatically type
 messages or press Enter into a terminal that might be asking for permission.
 Their native support for mid-response messages varies by CLI and version.
+
+External agents also start without the initial request in their command-line
+arguments. Use **Copy request**, then paste into the agent's message input and
+send when it is ready. This applies to the embedded and standalone terminal.
+The complete request stays in panel memory until you change agents, start a new
+chat or close the application; copying uses the desktop clipboard, which may be
+retained by your clipboard manager. The panel does not automatically paste or
+submit it. Native Codex and Claude keep their direct stdin-based delivery.
 
 ## Agent support
 

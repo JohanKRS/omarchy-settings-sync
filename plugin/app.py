@@ -177,6 +177,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.effort_values = [""]
         self.cards = {}
         self.message_entries = {}
+        self.reply_body = None
         self.tool_items = {}
         self.panels = []
         self.setup_panel = None
@@ -189,6 +190,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.monitor_name = ""
         self.terminal_pid = None
         self.last_prompt = ""
+        self.external_prompt = ""
         self.active_task = None
         self.session_file = self.locations["state"] / "conversation.json"
         self._build()
@@ -325,6 +327,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.content.add_named(empty, "empty")
         self.vte = None
         outer.append(self.content)
+        self.external_prompt_area = box(spacing=4)
+        self.external_prompt_area.append(label(tr('Copy the request, then paste it into the agent input and send.'), 'muted'))
+        self.copy_request_button = Gtk.Button(label=tr('Copy request'), halign=Gtk.Align.START)
+        self.copy_request_button.connect('clicked', lambda *_: self.copy_to_terminal(self.external_prompt)
+                                         if self.external_prompt else None)
+        self.external_prompt_area.append(self.copy_request_button)
+        self.external_prompt_area.set_visible(False)
+        outer.append(self.external_prompt_area)
         self.queue_area = box(spacing=2)
         self.queue_area.add_css_class('queue-area')
         queue_header = box(False, 6)
@@ -542,10 +552,16 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.thread_id = self.thread_ids.get(self.agent())
             self.session_file = self.locations["state"] / ("conversation.json" if self.agent() == "codex" else "conversation-" + self.agent() + ".json")
             self.messages, self.cards, self.message_entries, self.tool_items = [], {}, {}, {}
+            if self.reply_body:
+                self.reply_body.set_choices_enabled(False)
+            self.reply_body = None
+            self.external_prompt = ""
+            self.external_prompt_area.set_visible(False)
             while self.transcript.get_first_child():
                 self.transcript.remove(self.transcript.get_first_child())
             for message in read_json(self.session_file, [])[-100:]:
-                self.add_message(message["role"], message["text"], save=False)
+                self.add_message(message["role"], message["text"], save=False,
+                                 choices_answered=message.get('choices_answered', False))
         self.selected_agent = self.agent()
         if previous != self.agent():
             self.queue_paused = bool(self.outbox.for_agent(self.agent()))
@@ -754,6 +770,30 @@ class SettingsWindow(Gtk.ApplicationWindow):
         working = self.busy and not self.attention_waiting
         self.spinner.set_spinning(working)
         self.update_queue()
+        self.update_choices()
+
+    def choices_available(self):
+        return (self.agent() in NATIVE_AGENTS and bool(self.executables[self.agent()])
+                and not self.terminal_pid and not self.delivery_pending and not self.stopping
+                and not self.question_windows and (not self.busy or bool(self.turn_id)))
+
+    def update_choices(self):
+        if self.reply_body:
+            self.reply_body.set_choices_enabled(self.choices_available())
+
+    def reply_to_choice(self, body, entry, question, choice):
+        if body is not self.reply_body or body.choices_answered or not self.choices_available():
+            return
+        body.choices_answered = True
+        entry['choices_answered'] = True
+        body.set_choices_enabled(False)
+        text = question + '\n' + choice
+        accepted = self.steer(text) if self.busy else self.submit(text)
+        if not accepted:
+            body.choices_answered = False
+            entry.pop('choices_answered', None)
+        self.save_conversation()
+        self.update_choices()
 
     def composer_key(self, _controller, key, _code, state):
         if key not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
@@ -902,20 +942,30 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.update_buttons()
         return False
 
-    def add_message(self, role, text, identifier=None, save=True):
+    def add_message(self, role, text, identifier=None, save=True, *, complete=True, choices_answered=False):
+        if self.reply_body:
+            self.reply_body.set_choices_enabled(False)
+        self.reply_body = None
+        entry = {"role": role, "text": text}
+        if choices_answered:
+            entry['choices_answered'] = True
         card = box(spacing=6)
         card.add_css_class("message")
         if role == tr('You'):
             card.add_css_class("user-message")
         card.append(label(role, "card-role"))
-        body = MessageBody(text)
+        is_agent = role in {tr('Agent'), 'Agent', 'Agente'} and self.agent() in NATIVE_AGENTS
+        body = MessageBody(text, complete=complete, choices_answered=choices_answered,
+                           on_choice=(lambda q, a: self.reply_to_choice(body, entry, q, a)) if is_agent else None)
+        if is_agent:
+            self.reply_body = body
+            self.update_choices()
         card.append(body)
         self.transcript.append(card)
         if self.agent() in NATIVE_AGENTS or role == tr("Error"):
             self.content.set_visible_child_name("chat")
         if identifier:
             self.cards[identifier] = body
-        entry = {"role": role, "text": text}
         self.messages.append(entry)
         if identifier:
             self.message_entries[identifier] = entry
@@ -1048,8 +1098,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             "create" if create else "sync" if sync else "change", self.agent(), private_write,
         )
         if self.agent() not in NATIVE_AGENTS:
-            self.launch_external(prompt)
-            return True
+            return self.launch_external(prompt)
         model, effort = self.selection()
         if self.agent() == "claude" and self.client and (
                 self.client.model, self.client.effort, self.client.permission_mode
@@ -1144,9 +1193,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         elif method == "item/agentMessage/delta":
             identifier = params["itemId"]
             if identifier not in self.cards:
-                self.add_message(tr('Agent'), "", identifier)
+                self.add_message(tr('Agent'), "", identifier, complete=False)
             current = self.cards[identifier].get_text()
-            self.cards[identifier].set_text(current + params.get("delta", ""))
+            self.cards[identifier].set_text(current + params.get("delta", ""), complete=False)
             self.scroll_down()
         elif method == "item/started":
             item = params.get("item", {})
@@ -1163,7 +1212,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             if item.get("type") == "agentMessage":
                 text = item.get("text", "")
                 if identifier in self.cards:
-                    self.cards[identifier].set_text(text)
+                    self.cards[identifier].set_text(text, complete=True)
                     # Store complete messages, not every streaming fragment.
                     self.message_entries[identifier]["text"] = text
                     self.save_conversation()
@@ -1356,16 +1405,22 @@ class SettingsWindow(Gtk.ApplicationWindow):
         agent = self.agent()
         if not self.executables[agent]:
             self.failure(tr("Install {agent} from the Omarchy agent menu.", agent=AGENTS[agent]))
-            return
+            return False
         model, effort = self.selection()
-        command = external_command(agent, prompt, model, effort)
+        command = external_command(agent, model=model, effort=effort)
         if command[0] == agent:
             command[0] = self.executables[agent]
+        self.external_prompt = prompt
+        self.external_prompt_area.set_visible(True)
         if not self.ensure_vte():
-            terminal(command)
+            try:
+                terminal(command)
+            except OSError as error:
+                self.failure(str(error))
+                return False
             self.finish_activity("external_unverified")
-            self.status.set_text(tr('Opened in terminal.'))
-            return
+            self.status.set_text(tr('Opened in terminal. Copy and paste the request.'))
+            return True
         self.content.set_visible_child_name("terminal")
         self.vte.reset(True, True)
         self.locations["workspace"].mkdir(parents=True, exist_ok=True)
@@ -1381,7 +1436,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.failure(str(error))
                 return
             self.terminal_pid = pid
-            self.status.set_text(AGENTS[agent] + tr(' · active'))
+            self.status.set_text(tr('Copy and paste the request into {agent}.', agent=AGENTS[agent]))
             self.update_buttons()
             self.vte.grab_focus()
         self.vte.spawn_async(
@@ -1390,6 +1445,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             spawn_flags=GLib.SpawnFlags.SEARCH_PATH, child_setup=None,
             timeout=-1, cancellable=None, callback=spawned,
         )
+        return True
 
     def ensure_vte(self):
         if self.vte:
@@ -1499,6 +1555,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.messages:
             private_write(self.locations["state"] / "history" / (time.strftime("%Y%m%d-%H%M%S") + ".json"), self.messages)
         self.messages = []
+        if self.reply_body:
+            self.reply_body.set_choices_enabled(False)
+        self.reply_body = None
+        self.external_prompt = ""
+        self.external_prompt_area.set_visible(False)
         self.cards = {}
         self.message_entries = {}
         self.tool_items = {}

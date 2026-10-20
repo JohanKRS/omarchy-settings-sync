@@ -200,7 +200,7 @@ class CodexClient:
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
         self.request("initialize", {
-            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.1.7"},
+            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.1.8"},
             "capabilities": {"experimentalApi": True},
         })
         self.notify("initialized", {})
@@ -312,31 +312,29 @@ class CodexClient:
         })
 
 
-def external_command(agent, prompt, model="", effort=""):
-    """Interactive alternatives keep their own authentication and approval UI."""
+def external_command(agent, *, model="", effort=""):
+    """Launch an interactive CLI without placing private requests in argv."""
     if agent == "claude":
         cmd = ["claude", "--permission-mode", "auto"]
         if model:
             cmd += ["--model", model]
         if effort and effort in ("low", "medium", "high", "xhigh", "max"):
             cmd += ["--effort", effort]
-        return cmd + ["--", prompt]
+        return cmd
     if agent == "codex":
         cmd = ["codex", "--approve-for-me"]
         if model:
             cmd += ["--model", model]
         if effort:
             cmd += ["-c", f'model_reasoning_effort={json.dumps(effort)}']
-        return cmd + ["--", prompt]
-    # Prompt forms mirror Omarchy's launcher. Keep each CLI's normal approval
-    # policy instead of adding its bypass/yolo switches.
+        return cmd
+    # The request is copied explicitly by the user and pasted into the CLI's
+    # input. Keep authentication, approval controls and interactive TTY modes.
     if agent not in AGENTS:
         raise ValueError(tr("Unknown agent."))
     cmd = ["omarchy-launch-openclaw", "--tui"] if agent == "openclaw" else [agent]
     if agent == "hermes":
         cmd += ["chat", "--tui"]
-    if agent == "crush":
-        cmd += ["run"]
     if agent == "cursor-agent":
         cmd += ["agent"]
     if model and agent in {"opencode", "gemini", "copilot", "cursor-agent", "pi", "omp"}:
@@ -345,16 +343,6 @@ def external_command(agent, prompt, model="", effort=""):
         cmd += ["--variant", effort]
     if effort and agent in {"pi", "omp"}:
         cmd += ["--thinking", effort]
-    prompt_flags = {"opencode": "--prompt", "gemini": "--prompt-interactive",
-                    "copilot": "--interactive", "openclaw": "--message"}
-    if agent in prompt_flags:
-        cmd += [prompt_flags[agent], prompt]
-    elif agent == "hermes":
-        cmd += ["--query=" + prompt]
-    elif agent in {"pi", "crush"}:
-        cmd += [prompt]
-    else:
-        cmd += ["--", prompt]
     return cmd
 
 
