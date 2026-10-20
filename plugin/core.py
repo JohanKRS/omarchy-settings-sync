@@ -200,7 +200,7 @@ class CodexClient:
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
         self.request("initialize", {
-            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.1.3"},
+            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.1.4"},
             "capabilities": {"experimentalApi": True},
         })
         self.notify("initialized", {})
@@ -304,6 +304,12 @@ class CodexClient:
         if effort:
             args["effort"] = effort
         return self.request("turn/start", args)
+
+    def steer(self, thread_id, turn_id, text):
+        return self.request("turn/steer", {
+            "threadId": thread_id, "expectedTurnId": turn_id,
+            "input": [{"type": "text", "text": text}],
+        })
 
 
 def external_command(agent, prompt, model="", effort=""):

@@ -103,6 +103,11 @@ class Theme:
             .toolbar {{ background: transparent; padding: 0; border-radius: 0; }}
             .message {{ background: transparent; padding: 10px 2px;
                         border-bottom: 1px solid alpha({fg}, .1); border-radius: 0; }}
+            .popup-card scrolledwindow > overshoot,
+            .popup-card scrolledwindow > undershoot {{
+                background: transparent; background-image: none;
+                border: none; box-shadow: none;
+            }}
             .user-message {{ background: transparent; }}
             .card-role {{ color: {accent}; font-size: {max(1, size - 1)}px; opacity: 1; }}
             .composer {{ background: alpha({fg}, .025); border: 1px solid alpha({fg}, .3);

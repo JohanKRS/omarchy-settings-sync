@@ -73,6 +73,34 @@ The local release checks used Omarchy 4.0.5-1, Codex CLI 0.163.0 and Claude Code
 2.1.302. OpenCode and Cursor catalog adapters have fixture tests; other agent
 accounts have not been exercised in this environment.
 
+## Follow-up support
+
+| Agent integration | Queue | Direction during work |
+| --- | --- | --- |
+| Codex app-server | Local durable queue, automatically dispatched after `turn/completed` | `turn/steer` with `expectedTurnId` |
+| Claude stream-json | Local durable queue, automatically dispatched after a result | Interrupt acknowledgement plus terminal result, then a new input in the same session |
+| All embedded CLIs | Local durable queue, manually copied into the native input | Use the running CLI's own controls; native capabilities vary |
+
+Only a successful native completion advances the automatic queue. Stop, errors,
+disconnection and restart require explicit resume. Unconfirmed transport
+delivery is retained and requires review instead of automatic retry. Queue
+entries retain their publication choice and cannot dispatch into a different
+repository, branch or native conversation.
+
+The installed Codex 0.163.0 schema includes `turn/steer`. Protocol fixtures and
+the graphical smoke test cover native follow-up sequencing, interrupted Claude
+continuation, uncertain delivery and all external agent queue/copy controls.
+These checks do not establish live model behavior or queue/steering support in
+every third-party CLI. Terminal automation deliberately does not guess when
+those agents have finished a response or are waiting for a permission answer.
+
+The 0.1.4 build passed 29 portable tests, the extended graphical test in
+Portuguese, the D-Bus launcher test, manifest validation, QML lint and syntax
+checks. The synthetic panel previews were regenerated and inspected.
+
+Protocol references: [Codex App Server](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn)
+and [Claude streaming input](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode).
+
 The prepared 0.1.3 build passed the Omarchy manifest validator, QML lint, 22
 portable tests, the graphical smoke test and the D-Bus launcher smoke test.
 Live shell checks passed for summon, hide, toggle, switching to the clock popout

@@ -4,12 +4,13 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import time
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugin"))
 from app import Application, SettingsWindow, Gtk, Gdk, GLib, LayerShell
-from core import private_write
+from core import AGENTS, private_write
 from claude_client import ClaudeClient
 
 CLAUDE_MODELS = [
@@ -85,6 +86,9 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             return result
         settle()
         baseline = geometry()
+        assert not window.queue_button.get_visible(), 'An empty queue should not add controls'
+        assert window.terminal_button.get_next_sibling() == window.stop_button
+        assert window.stop_button.get_next_sibling() is None, 'Stop belongs at the right edge'
         # Long names, different catalogs and unsupported efforts must not move
         # the controls, composer, panel edge or footer action.
         window.agent_select.set_selected(window.agent_ids.index("claude"))
@@ -141,6 +145,30 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             window.event({"method": "item/completed", "params": {"item": {"type": "agentMessage", "id": ident, "text": ident + " done"}}})
         assert window.message_entries["a"]["text"] == "a done"
         assert window.message_entries["b"]["text"] == "b done"
+        # Streaming/final updates must follow the new layout, not yesterday's
+        # adjustment range. The whole final line needs room above the composer.
+        streamed_text = ('Earlier line of a long response.\n' * 40)
+        window.event({'method': 'item/agentMessage/delta', 'params': {
+            'itemId': 'scroll-bottom', 'delta': streamed_text}})
+        settle()
+        final_text = streamed_text + ('The final response can wrap onto additional lines. ' * 6) + '\nÚltima linha: gypq.'
+        window.event({'method': 'item/completed', 'params': {'item': {
+            'type': 'agentMessage', 'id': 'scroll-bottom', 'text': final_text}}})
+        settle()
+        adjustment = window.scroll.get_vadjustment()
+        assert abs(adjustment.get_upper() - adjustment.get_page_size() - adjustment.get_value()) < 1, 'Final streamed line was left below the viewport'
+        ok, last_line = window.cards['scroll-bottom'].compute_bounds(window.scroll)
+        assert ok and last_line.get_y() + last_line.get_height() <= window.scroll.get_height() - 8, ('Last line needs bottom breathing room', last_line.get_y(), last_line.get_height(), window.scroll.get_height(), adjustment.get_value(), adjustment.get_upper(), adjustment.get_page_size())
+        # Reading older messages must not be interrupted by a streaming update.
+        adjustment.set_value(0)
+        window.event({'method': 'item/agentMessage/delta', 'params': {'itemId': 'scroll-bottom', 'delta': '\nMore text'}})
+        settle()
+        assert adjustment.get_value() == 0 and not window.scroll.follow_tail
+        window.scroll.to_end(force=True)
+        window.scroll.pull(-100)
+        assert -28 <= window.transcript.offset < 0
+        wait(lambda: window.scroll.tick is None)
+        assert window.transcript.offset == 0
         # The first submission starts the backend, preserving the selected controls.
         window.client = None
         window.ready = False
@@ -154,9 +182,84 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         wait(lambda: window.turn_id == "test-turn")
         backend.start.assert_called_once()
         assert backend.turn.call_args.args[2:] == ("sample-model", "high")
+        # Queued work waits for a completion; steering keeps the same turn.
+        window.input.get_buffer().set_text('Run after the current response')
+        assert window.composer_key(None, Gdk.KEY_Return, 0, 0)
+        assert len(window.outbox.for_agent('codex')) == 1
+        assert backend.turn.call_count == 1
+        pending = window.outbox.for_agent('codex')[0]
+        window.input.get_buffer().set_text('Do not overwrite this draft')
+        window.show_queue()
+        window.edit_queued(pending)
+        assert pending in window.outbox.entries
+        assert window.input.get_buffer().get_char_count() > 0
+        window.input.get_buffer().set_text('')
+        window.show_queue()
+        window.edit_queued(pending)
+        assert pending not in window.outbox.entries and window.queue_paused
+        window.send(queued=True)
+        window.show_queue()
+        next(w for w in widgets(window.queue_panel) if isinstance(w, Gtk.Button) and
+             w.get_label() == tr('Resume queue')).emit('clicked')
+        assert not window.queue_paused and not window.panels
+        window.input.get_buffer().set_text('Focus on the keyboard first')
+        window.composer_key(None, Gdk.KEY_Return, 0, Gdk.ModifierType.CONTROL_MASK)
+        wait(lambda: not window.delivery_pending)
+        backend.steer.assert_called_once_with('test-thread', 'test-turn', 'Focus on the keyboard first')
+        assert window.busy and backend.turn.call_count == 1
+        assert len(window.outbox.for_agent('codex')) == 1
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        wait(lambda: not window.delivery_pending)
+        assert window.busy and backend.turn.call_count == 2
+        assert not window.outbox.for_agent('codex')
+        assert 'Run after the current response' in backend.turn.call_args.args[1]
+        direction = window.queue_message('Promote this queued message')
+        window.show_queue()
+        next(w for w in widgets(window.queue_panel) if isinstance(w, Gtk.Button) and
+             w.get_label() == tr('Direct now')).emit('clicked')
+        wait(lambda: not window.delivery_pending)
+        assert not window.outbox.for_agent('codex') and direction not in window.outbox.entries
+        assert window.busy and backend.turn.call_count == 2, 'Promoting a queue item must steer without duplicating it'
         window.event({"method": "turn/completed",
                       "params": {"threadId": "test-thread", "turn": {"status": "completed"}}})
         assert not window.busy
+        # A rejected/unknown steering delivery must not mark the active turn idle.
+        assert window.submit('Keep working after a failed steer')
+        wait(lambda: not window.delivery_pending)
+        backend.steer.side_effect = RuntimeError('Simulated steering timeout')
+        assert window.steer('A message whose delivery is unknown')
+        wait(lambda: not window.delivery_pending)
+        assert window.busy and window.queue_paused
+        kept = window.outbox.for_agent('codex')[0]
+        assert kept['state'] == 'uncertain'
+        window.remove_queued(kept)
+        backend.steer.side_effect = None
+        window.queue_message('Keep this after stopping')
+        window.stop()
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'interrupted'}}})
+        assert not window.busy and window.queue_paused
+        assert len(window.outbox.for_agent('codex')) == 1
+        window.remove_queued(window.outbox.for_agent('codex')[0])
+        # A completion can reach GTK before the worker receives turn/start's ACK.
+        # Do not start another request until that first ACK is handled.
+        release_start = threading.Event()
+        def slow_ack(*_):
+            release_start.wait(5)
+            return {'turn': {'id': 'fast-turn'}}
+        backend.turn.side_effect = slow_ack
+        window.queue_paused = False
+        calls_before = backend.turn.call_count
+        assert window.submit('Response before acknowledgement')
+        wait(lambda: backend.turn.call_count == calls_before + 1)
+        window.queue_message('After the fast response')
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        assert not window.busy and window.delivery_pending
+        assert backend.turn.call_count == calls_before + 1
+        release_start.set()
+        wait(lambda: backend.turn.call_count == calls_before + 2 and not window.delivery_pending)
+        assert window.busy and not window.outbox.for_agent('codex')
+        backend.turn.side_effect = None
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
         # A failed connection must close its backend and allow a fresh attempt.
         window.client = None
         window.ready = False
@@ -215,6 +318,19 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             assert not json.loads(window.attention_file.read_text())["waiting"]
             response = json.loads(window.messages[-1]["text"])
             assert response["updatedInput"]["answers"] == {"Which color?": "Blue", "Which extras?": "One, Two"}
+            assert window.submit('Task to redirect')
+            wait(lambda: bool(window.question_windows) and not window.delivery_pending)
+            old_turn, old_pid = window.turn_id, window.client.process.pid
+            window.queue_message('Later follow-up')
+            assert window.steer('New direction in the same conversation')
+            wait(lambda: window.turn_id and window.turn_id != old_turn and
+                 bool(window.question_windows) and not window.delivery_pending)
+            assert window.client.process.pid == old_pid and window.thread_id == session_id
+            assert [entry['text'] for entry in window.outbox.for_agent('claude')] == ['Later follow-up']
+            window.stop()
+            wait(lambda: not window.busy)
+            assert window.queue_paused and len(window.outbox.for_agent('claude')) == 1
+            window.remove_queued(window.outbox.for_agent('claude')[0])
             window.agent_select.set_selected(window.agent_ids.index("codex"))
             assert window.thread_id == "test-thread"
             window.agent_select.set_selected(window.agent_ids.index("claude"))
@@ -232,6 +348,24 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             wait(lambda: window.client is None)
             assert not window.busy and not window.attention_waiting
         window.close_client()
+        # Every external adapter can keep and copy follow-ups while its PTY runs.
+        # Copying must never inject Enter, text, or permission answers into a PTY.
+        for agent in AGENTS.keys() - {'codex', 'claude'}:
+            window.executables[agent] = sys.executable
+            window.agent_select.set_selected(window.agent_ids.index(agent))
+            window.terminal_pid = 12345
+            window.vte = Mock()
+            window.update_buttons()
+            assert window.input_area.get_sensitive() and window.send_button.get_sensitive()
+            window.input.get_buffer().set_text('External follow-up\nwith another line')
+            window.send(immediate=True)
+            assert len(window.outbox.for_agent(agent)) == 1
+            window.vte.feed_child.assert_not_called()
+            window.vte.paste_text.assert_not_called()
+            assert window.popup_key(None, Gdk.KEY_Escape, 0, 0) is False
+            window.terminal_pid = None
+            window.remove_queued(window.outbox.for_agent(agent)[0])
+            window.vte = None
         if window.ensure_vte():
             window.agent_select.set_selected(window.agent_ids.index("claude"))
             with patch("app.external_command", return_value=[sys.executable, "-c", "import time; print('terminal-ok',flush=True); time.sleep(.4)"]), patch("app.shutil.which", return_value=sys.executable):
@@ -270,4 +404,4 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         GLib.source_remove(window.theme_timer)
         GLib.source_remove(window.attention_timer)
         window.destroy()
-        print("UI smoke passed: fixed layout, native Claude questions, answers, resume, cancel, disconnect, attention, terminal, settings, Codex protocol, dismissal")
+print("UI smoke passed: layout, questions, resume, cancellation, native queues and steering, acknowledgement races, all external queues, terminal, settings, dismissal")

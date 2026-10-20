@@ -104,6 +104,17 @@ class ProtocolTest(unittest.TestCase):
         with self.assertRaises(RpcError):
             self.client.request("test/disconnect", {}, timeout=3)
 
+    def test_steering_targets_existing_turn_without_model_overrides(self):
+        self.client.turn('thread-test', 'first message')
+        result = self.client.steer('thread-test', 'turn-test', 'focus on the keyboard')
+        self.assertEqual(result['turnId'], 'turn-test')
+        self.assertEqual(result['received'], {
+            'threadId': 'thread-test', 'expectedTurnId': 'turn-test',
+            'input': [{'type': 'text', 'text': 'focus on the keyboard'}],
+        })
+        with self.assertRaisesRegex(RpcError, 'Turn mismatch'):
+            self.client.steer('thread-test', 'stale-turn', 'must not target a successor')
+
 
 class ContextTest(unittest.TestCase):
     def setUp(self):

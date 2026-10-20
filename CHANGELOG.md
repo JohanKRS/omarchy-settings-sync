@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.4 — Unreleased
+
+- Add a durable per-agent follow-up queue with review, pause/resume, edit and
+  removal controls, available for all supported agents.
+- Automatically dispatch native Codex/Claude follow-ups in order after a
+  successful response; pause after Stop, failure, disconnection or application
+  restart. Retain messages with unconfirmed delivery for manual review.
+- Steer an active Codex turn with its expected turn ID. Redirect Claude by
+  interrupting and continuing in the same process and conversation.
+- Keep the composer available for embedded CLIs. Copy pending messages for
+  manual paste into their native inputs, without sending terminal keystrokes
+  or assuming that a permission prompt is a conversation input.
+- Keep a single contextual Send/Queue button and show the queue count only
+  when messages are pending. Put Direct now on each queued native message;
+  Ctrl+Enter also sends immediately, and Shift+Enter inserts a newline.
+- Place the terminal control to the left of Stop at the footer's right edge.
+- Use a flat icon-and-text Sync action in the header instead of a close button.
+  Keep the repository and model refresh information in Settings, remove the
+  duplicate agent selector there and align the repository actions to full width.
+- Follow the final laid-out line, preserve the reading position when scrolling
+  up and replace edge shadows with a subtle elastic movement.
+- Preserve Escape for native CLI controls when the embedded terminal has focus.
+- Translate queue controls into Portuguese and Spanish.
+
 ## 0.1.3 — Unreleased
 
 Prepare Omarchy Settings Sync for public distribution as a tool for synchronizing

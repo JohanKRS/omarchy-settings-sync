@@ -20,7 +20,7 @@ def main():
         if path.is_symlink():
             errors.append(f'Symlinks cannot ship in an Omarchy plugin: {relative}')
         if (path.name in {'settings.json', 'attention.json', 'auth.json', 'credentials.json',
-                          'model-catalog.json', 'last-sync.json', 'activity.json'}
+                          'model-catalog.json', 'last-sync.json', 'activity.json', 'outbox.json'}
                 or re.fullmatch(r'conversation.*\.json', path.name)
                 or path.name == '.env' or (path.name.startswith('.env.') and path.name != '.env.example')
                 or any(part in {'.claude', '.codex', '__pycache__', '.venv'} for part in path.parts)):

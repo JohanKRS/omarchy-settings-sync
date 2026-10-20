@@ -4,6 +4,7 @@ import queue
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugin"))
 from claude_client import ClaudeClient
@@ -65,6 +66,13 @@ class ClaudeTest(unittest.TestCase):
         self.assertEqual(self.until("question/cancelled")["params"]["id"], "question")
         self.assertEqual(self.until("turn/completed")["params"]["turn"]["status"], "interrupted")
         self.assertFalse(self.client.requests)
+
+    def test_stale_interrupt_cannot_stop_a_successor_turn(self):
+        self.ask()
+        with patch.object(self.client, 'send') as send:
+            self.assertEqual(self.client.request('turn/interrupt', {'turnId': 'old-turn'}), {})
+            send.assert_not_called()
+        self.assertFalse(self.client.interrupted)
 
     def test_startup_preserves_profile_and_binds_resume_as_a_value(self):
         client = ClaudeClient(lambda _: None, model="custom", effort="high", session_id="--not-a-flag")

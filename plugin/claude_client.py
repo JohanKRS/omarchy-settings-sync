@@ -50,6 +50,8 @@ class ClaudeClient(CodexClient):
 
     def request(self, method, params=None, timeout=45):
         if method == "turn/interrupt":
+            if not self.turn_id or (params and params.get('turnId') and params['turnId'] != self.turn_id):
+                return {}  # The completed turn must not interrupt its successor.
             method, params = "interrupt", {}
             self.interrupted = True
         with self.lock:
@@ -160,12 +162,15 @@ class ClaudeClient(CodexClient):
                 if block.get("type") == "tool_use":
                     self.emit("item/started", {"item": {"id": block.get("id"), "type": "mcpToolCall", "tool": block.get("name", "")}})
         elif kind == "result":
+            if not self.turn_id:
+                return
             if not self.had_text and message.get("result") and not message.get("is_error"):
                 self.emit("item/completed", {"item": {"id": str(uuid.uuid4()), "type": "agentMessage", "text": message["result"]}})
-            turn = {"status": "interrupted" if self.interrupted else "completed"}
+            turn = {"id": self.turn_id, "status": "interrupted" if self.interrupted else "completed"}
             if message.get("is_error") and not self.interrupted:
                 turn["error"] = {"message": "\n".join(message.get("errors", [])) or message.get("result") or message.get("subtype", "Claude Code error")}
             self.requests.clear()
+            self.turn_id = None
             self.emit("turn/completed", {"turn": turn})
         elif kind == "error":
             self.emit("error", {"message": message.get("error", "Claude Code error")})

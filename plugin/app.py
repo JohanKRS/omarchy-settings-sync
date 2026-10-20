@@ -27,6 +27,8 @@ from theme import Theme
 from context import begin_task, finish_task
 from catalog import MODEL_AGENTS, DISCOVERY_AGENTS, agent_executable, discover_models
 from claude_client import ClaudeClient
+from outbox import Outbox
+from chat_view import ChatView
 
 NATIVE_AGENTS = {"codex", "claude"}
 
@@ -116,6 +118,7 @@ class Panel(Gtk.Box):
         self.owner.main_content.set_sensitive(False)
         self.owner.overlay.add_overlay(self)
         self.owner.panels.append(self)
+        self.owner.update_buttons()
         self.grab_focus()
 
     def destroy(self):
@@ -123,6 +126,7 @@ class Panel(Gtk.Box):
             self.owner.panels.remove(self)
             self.owner.overlay.remove_overlay(self)
         self.owner.main_content.set_sensitive(not self.owner.panels)
+        self.owner.update_buttons()
 
 
 class SettingsWindow(Gtk.ApplicationWindow):
@@ -153,6 +157,12 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.thread_id = None
         self.thread_loaded = False
         self.turn_id = None
+        self.outbox = Outbox(self.locations["state"] / "outbox.json")
+        self.queue_paused = bool(self.outbox.entries)
+        self.queue_panel = None
+        self.delivery_pending = False
+        self.redirect_entry = None
+        self.stopping = False
         self.models = cached_models()
         self.executables = {agent: agent_executable(agent) for agent in AGENTS}
         self.catalog_file = self.locations["state"] / "model-catalog.json"
@@ -197,7 +207,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         clicks.connect("pressed", self.popup_click)
         self.add_controller(clicks)
         self.place_popup()
-        self.refresh_sync_label()
         self.agent_changed()
         if not self.settings.get("repository"):
             GLib.idle_add(self.setup)
@@ -236,9 +245,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.new_button.connect("clicked", lambda *_: self.new_chat())
         header.append(self.new_button)
         header.append(settings_button)
-        close = Gtk.Button(icon_name="window-close-symbolic")
-        close.connect("clicked", lambda *_: self.dismiss())
-        header.append(close)
+        sync_content = box(False, 6)
+        sync_content.append(Gtk.Image.new_from_icon_name("view-refresh-symbolic"))
+        sync_content.append(Gtk.Label(label="Sync"))
+        self.sync_button = Gtk.Button(child=sync_content, tooltip_text=tr('Sync'))
+        self.sync_button.add_css_class("flat")
+        self.sync_button.connect("clicked", lambda *_: self.sync())
+        header.append(self.sync_button)
         self.popup_card.append(header)
         outer = box(spacing=10)
         for side in ("top", "bottom", "start", "end"):
@@ -250,19 +263,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.popup_canvas = Gtk.Fixed()
         self.popup_canvas.put(self.popup_card, 0, 0)
         self.set_child(self.popup_canvas)
-        hero = box(False, 12)
-        headings = box(spacing=3)
-        headings.set_hexpand(True)
-        self.repo_label = label("", "muted")
-        self.repo_label.set_wrap(False)
-        self.repo_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        headings.append(self.repo_label)
-        hero.append(headings)
-        self.sync_button = Gtk.Button(label=tr('Sync'), valign=Gtk.Align.CENTER)
-        self.sync_button.add_css_class("suggested-action")
-        self.sync_button.connect("clicked", lambda *_: self.sync())
-        hero.append(self.sync_button)
-        outer.append(hero)
         controls = Gtk.Grid(column_spacing=10, column_homogeneous=True)
         self.controls = controls
         controls.add_css_class("toolbar")
@@ -279,25 +279,23 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.effort_select.connect("notify::selected", lambda *_: self.remember_selection())
         controls.attach(self.control(tr('Effort'), self.effort_select, expand=True), 2, 0, 1, 1)
         outer.append(controls)
-        model_info = box(False, 8)
+        self.model_info = box(False, 8)
         self.model_hint = label("", "muted")
         self.model_hint.set_wrap(False)
         self.model_hint.set_ellipsize(Pango.EllipsizeMode.END)
         self.model_hint.set_max_width_chars(1)
         self.model_hint.set_hexpand(True)
-        model_info.append(self.model_hint)
+        self.model_info.append(self.model_hint)
         self.refresh_models_button = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text=tr('Refresh models'))
         self.refresh_models_button.add_css_class("flat")
         self.refresh_models_button.connect("clicked", lambda *_: self.refresh_catalog(force=True))
-        model_info.append(self.refresh_models_button)
-        outer.append(model_info)
+        self.model_info.append(self.refresh_models_button)
         self.content = Gtk.Stack()
         self.content.set_vexpand(True)
         self.content.set_hhomogeneous(False)
         self.content.set_vhomogeneous(False)
-        self.scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
-        self.transcript = box(spacing=10)
-        self.scroll.set_child(self.transcript)
+        self.scroll = ChatView()
+        self.transcript = self.scroll.messages
         self.content.add_named(self.scroll, "chat")
         empty = box(spacing=10)
         empty.set_valign(Gtk.Align.CENTER)
@@ -335,6 +333,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
         input_scroll.set_child(input_overlay)
         self.input_area.append(input_scroll)
         self.input.set_tooltip_text(tr("Change your system…"))
+        composer_keys = Gtk.EventControllerKey()
+        composer_keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        composer_keys.connect("key-pressed", self.composer_key)
+        self.input.add_controller(composer_keys)
         row = box(False, 8)
         self.publish = Gtk.CheckButton(label=tr('Push changes'))
         self.publish.set_active(self.settings.get("publish", True))
@@ -342,9 +344,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
         row.append(self.publish)
         self.stop_button = Gtk.Button(label=tr('Stop'), sensitive=False)
         self.stop_button.connect("clicked", lambda *_: self.stop())
+        self.queue_button = Gtk.Button(label=tr('{count} queued', count=0))
+        self.queue_button.add_css_class('flat')
+        self.queue_button.connect("clicked", lambda *_: self.show_queue())
+        row.append(self.queue_button)
         self.send_button = Gtk.Button(label=tr('Send'))
         self.send_button.add_css_class("suggested-action")
-        self.send_button.set_size_request(84, 36)
+        self.send_button.set_size_request(104, 36)
         self.send_button.connect("clicked", lambda *_: self.send())
         row.append(self.send_button)
         self.input_area.append(row)
@@ -360,7 +366,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.status.connect("notify::label", lambda *_: self.status.set_tooltip_text(self.status.get_text()))
         self.status.set_hexpand(True)
         bottom.append(self.status)
-        bottom.append(self.stop_button)
         self.stop_button.set_size_request(104, 36)
         self.stop_button.set_valign(Gtk.Align.CENTER)
         self.terminal_button = Gtk.Button(icon_name="utilities-terminal-symbolic", tooltip_text=tr('Open workspace terminal'))
@@ -368,6 +373,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.terminal_button.set_size_request(36, 36)
         self.terminal_button.connect("clicked", lambda *_: self.open_terminal())
         bottom.append(self.terminal_button)
+        bottom.append(self.stop_button)
         outer.append(bottom)
 
     def control(self, title, widget, expand=False):
@@ -430,6 +436,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 return False
             if close_popover(self.popup_card):
                 return True
+            if self.terminal_pid and self.vte and self.vte.has_focus():
+                # Escape is also a native agent interrupt/edit key.
+                return False
             self.dismiss()
             return True
         return False
@@ -446,7 +455,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.quit_if_idle()
 
     def quit_if_idle(self):
-        if self.get_visible() or self.busy or self.terminal_pid or self.question_windows:
+        if self.get_visible() or self.busy or self.terminal_pid or self.question_windows or self.delivery_pending:
             return False
         self.close_client(background=True)
         if self.idle_timer is None:
@@ -455,7 +464,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
     def expire_idle(self):
         self.idle_timer = None
-        if not (self.get_visible() or self.busy or self.terminal_pid or self.question_windows):
+        if not (self.get_visible() or self.busy or self.terminal_pid or self.question_windows or self.delivery_pending):
             self.get_application().quit()
         return False
 
@@ -508,6 +517,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
             for message in read_json(self.session_file, [])[-100:]:
                 self.add_message(message["role"], message["text"], save=False)
         self.selected_agent = self.agent()
+        if previous != self.agent():
+            self.queue_paused = bool(self.outbox.for_agent(self.agent()))
         self.render_models()
         self.show_idle_content()
         self.status.set_text(tr('Ready · ') + AGENTS[self.agent()])
@@ -668,14 +679,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.render_models()
             self.update_buttons()
 
-    def worker(self, operation, done=None):
+    def worker(self, operation, done=None, failed=None):
         def work():
             try:
                 result = operation()
                 if done:
                     ui(done, result)
             except Exception as error:
-                ui(self.failure, str(error))
+                ui(failed or self.failure, str(error))
         threading.Thread(target=work, daemon=True).start()
 
     def connected_models(self, models):
@@ -689,21 +700,173 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.settings.get("permissions", "auto"), tr('auto review'))
 
     def update_buttons(self):
-        available = not self.busy and not self.terminal_pid
+        available = not self.busy and not self.terminal_pid and not self.delivery_pending
         installed = bool(self.executables[self.agent()])
-        self.send_button.set_sensitive(available and installed)
-        self.sync_button.set_sensitive(available and installed)
+        running = self.busy or bool(self.terminal_pid)
+        self.send_button.set_label(tr('Queue') if running or self.delivery_pending else tr('Send'))
+        self.send_button.set_sensitive(installed)
+        self.send_button.set_tooltip_text(tr('Enter: queue. Ctrl+Enter: send now. Shift+Enter: new line.')
+                                         if running else tr('Enter: send. Shift+Enter: new line.'))
+        self.sync_button.set_sensitive(available and installed and not self.panels)
         self.terminal_button.set_sensitive(True)
-        self.new_button.set_sensitive(not self.busy and not self.terminal_pid)
-        self.agent_select.set_sensitive(not self.busy and not self.terminal_pid)
+        self.new_button.set_sensitive(available and not self.panels and not self.outbox.for_agent(self.agent()))
+        self.agent_select.set_sensitive(available)
         self.model_select.set_sensitive(available and bool(self.executables[self.agent()]) and self.agent() in MODEL_AGENTS)
         self.effort_select.set_sensitive(available and len(self.effort_values) > 1)
         self.effort_select.set_tooltip_text(tr('Effort') if len(self.effort_values) > 1 else tr('Effort is managed by this agent.'))
         self.refresh_models_button.set_sensitive(available and bool(self.executables[self.agent()]) and self.agent() in DISCOVERY_AGENTS | {"codex"} and self.agent() not in self.catalog_pending)
-        self.input_area.set_sensitive(not self.terminal_pid)
-        self.stop_button.set_sensitive(self.busy or bool(self.terminal_pid))
+        self.input_area.set_sensitive(True)
+        self.publish.set_sensitive(not running and not self.delivery_pending)
+        self.stop_button.set_sensitive(running and not self.stopping)
         self.stop_button.set_visible(True)
         self.spinner.set_spinning(self.busy and not self.attention_waiting)
+        self.update_queue()
+
+    def composer_key(self, _controller, key, _code, state):
+        if key not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            return False
+        if state & Gdk.ModifierType.SHIFT_MASK:
+            return False
+        self.send(immediate=bool(state & Gdk.ModifierType.CONTROL_MASK))
+        return True
+
+    def queue_message(self, text, *, first=False):
+        if not self.settings.get("repository"):
+            self.setup()
+            return None
+        entry = self.outbox.add(self.agent(), self.settings["repository"], self.settings.get("branch", ""),
+                                self.thread_id, text, self.publish.get_active(), first=first)
+        self.save_settings()
+        self.update_buttons()
+        return entry
+
+    def update_queue(self):
+        entries = self.outbox.for_agent(self.agent())
+        self.queue_button.set_label(tr('{count} queued', count=len(entries)))
+        self.queue_button.set_visible(bool(entries))
+        self.queue_button.set_tooltip_text(tr('Queue paused') if self.queue_paused else tr('Queued messages'))
+        if self.queue_panel in self.panels:
+            self.render_queue()
+
+    def show_queue(self):
+        if self.queue_panel in self.panels:
+            return
+        self.queue_panel = Panel(self, tr('Queued messages'))
+        self.render_queue()
+        self.queue_panel.present()
+
+    def render_queue(self):
+        content = box(spacing=12)
+        entries = self.outbox.for_agent(self.agent())
+        native = self.agent() in NATIVE_AGENTS and not self.terminal_pid
+        content.append(label(tr('Messages are saved until sent. Stop or an error pauses the queue.') if native else
+                             tr('Copy a message, paste it into the agent input, then use its send or queue keys. Remove it here after sending.')))
+        if entries and native:
+            resume = Gtk.Button(label=tr('Resume queue') if self.queue_paused or not self.busy else tr('Pause queue'))
+            resume.set_sensitive(not self.delivery_pending and not self.stopping)
+            def toggle(*_):
+                self.queue_paused = not self.queue_paused if self.busy else False
+                self.queue_panel.destroy()
+                self.drain_queue()
+                self.update_buttons()
+            resume.connect('clicked', toggle)
+            content.append(resume)
+        if not entries:
+            content.append(label(tr('No queued messages.')))
+        for entry in entries:
+            card = box(spacing=6)
+            card.add_css_class('message')
+            card.append(label(entry['text'], selectable=True))
+            card.append(label(tr('Push changes') if entry['publish'] else tr('Local changes only'), 'muted'))
+            if not self.queue_matches(entry):
+                card.append(label(tr('From another conversation or repository. Edit to reuse.')))
+            if entry.get('state') == 'uncertain':
+                card.append(label(tr('Delivery unconfirmed. Check the conversation before editing and retrying.')))
+            actions = box(False, 8)
+            if native:
+                now = Gtk.Button(label=tr('Direct now') if self.busy else tr('Send now'))
+                now.add_css_class('suggested-action')
+                now.set_tooltip_text(tr('Interrupt and continue in the same conversation.')
+                                     if self.busy and self.agent() == 'claude' else tr('Ctrl+Enter'))
+                now.set_sensitive(not self.delivery_pending and not self.stopping and self.queue_matches(entry)
+                                  and entry.get('state') == 'pending' and entry is not self.redirect_entry
+                                  and (not self.busy or bool(self.turn_id)))
+                now.connect('clicked', lambda _, e=entry: self.send_queued_now(e))
+                actions.append(now)
+            for title, action in ((tr('Edit'), self.edit_queued), (tr('Remove'), self.remove_queued)):
+                button = Gtk.Button(label=title, sensitive=entry.get('state') != 'sending' and entry is not self.redirect_entry)
+                button.connect('clicked', lambda _, e=entry, fn=action: fn(e))
+                actions.append(button)
+            if not native:
+                copy = Gtk.Button(label=tr('Copy to terminal'))
+                copy.connect('clicked', lambda _, e=entry: self.copy_to_terminal(e['text']))
+                actions.append(copy)
+            card.append(actions)
+            content.append(card)
+        self.queue_panel.set_content(content)
+
+    def edit_queued(self, entry):
+        if entry.get('state') == 'sending' or entry is self.redirect_entry:
+            return
+        buffer = self.input.get_buffer()
+        if buffer.get_char_count():
+            self.status.set_text(tr('Keep or clear your draft before editing a queued message.'))
+            self.queue_panel.destroy()
+            return
+        self.queue_paused = True
+        self.publish.set_active(entry['publish'])
+        buffer.set_text(entry['text'])
+        self.outbox.remove(entry)
+        self.queue_panel.destroy()
+        self.update_buttons()
+        self.input.grab_focus()
+
+    def remove_queued(self, entry):
+        if entry.get('state') == 'sending' or entry is self.redirect_entry:
+            return
+        self.outbox.remove(entry)
+        self.update_buttons()
+
+    def copy_to_terminal(self, text):
+        self.get_clipboard().set(text)
+        if self.queue_panel in self.panels:
+            self.queue_panel.destroy()
+        if self.terminal_pid and self.vte:
+            self.vte.grab_focus()
+        self.status.set_text(tr('Copied. Paste into the agent input with Ctrl+Shift+V.'))
+
+    def send_queued_now(self, entry):
+        if self.delivery_pending or self.stopping or entry.get('state') != 'pending' or not self.queue_matches(entry):
+            return
+        if self.queue_panel in self.panels:
+            self.queue_panel.destroy()
+        if self.busy:
+            self.steer(entry['text'], queued_entry=entry)
+        else:
+            self.submit(entry['text'], queued_entry=entry, publish=entry['publish'])
+
+    def queue_matches(self, entry):
+        return self.outbox.matches(entry, self.settings.get('repository'), self.settings.get('branch', ''), self.thread_id)
+
+    def drain_queue(self):
+        if self.busy or self.delivery_pending or self.terminal_pid or self.stopping:
+            return False
+        if self.redirect_entry:
+            entry, self.redirect_entry = self.redirect_entry, None
+        elif not self.queue_paused and self.agent() in NATIVE_AGENTS:
+            entries = self.outbox.for_agent(self.agent())
+            entry = entries[0] if entries else None
+        else:
+            return False
+        if entry:
+            if entry.get('state') != 'pending' or not self.queue_matches(entry):
+                self.queue_paused = True
+                self.update_buttons()
+                return False
+            if not self.submit(entry['text'], queued_entry=entry, publish=entry['publish']):
+                self.queue_paused = True
+                self.update_buttons()
+        return False
 
     def add_message(self, role, text, identifier=None, save=True):
         card = box(spacing=6)
@@ -726,20 +889,23 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.message_entries[identifier] = entry
         if save:
             self.save_conversation()
-        self.scroll_down()
+        self.scroll.to_end(force=role == tr('You'))
         return body
 
     def save_conversation(self):
         private_write(self.session_file, self.messages[-150:])
 
     def scroll_down(self):
-        def adjust():
-            adj = self.scroll.get_vadjustment()
-            adj.set_value(max(0, adj.get_upper() - adj.get_page_size()))
-            return False
-        GLib.idle_add(adjust)
+        self.scroll.to_end()
 
     def failure(self, message):
+        self.queue_paused = True
+        self.redirect_entry = None
+        self.stopping = False
+        self.delivery_pending = False
+        for entry in self.outbox.for_agent(self.agent()):
+            if entry.get('state') == 'sending':
+                self.outbox.mark(entry, 'uncertain')
         self.finish_activity("failed")
         self.busy = False
         self.turn_id = None
@@ -748,12 +914,69 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.update_buttons()
         GLib.idle_add(self.quit_if_idle)
 
-    def send(self, *_):
+    def send(self, *_, queued=False, immediate=False):
         buffer = self.input.get_buffer()
         text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False).strip()
         if text:
-            if self.submit(text):
+            running = self.busy or self.terminal_pid or self.delivery_pending
+            if queued or (running and not immediate):
+                accepted = self.queue_message(text) is not None
+            elif self.terminal_pid:
+                accepted = self.queue_message(text) is not None
+                if accepted:
+                    self.copy_to_terminal(text)
+            elif self.busy:
+                accepted = self.steer(text)
+            elif self.delivery_pending:
+                accepted = False
+            else:
+                accepted = self.submit(text)
+            if accepted:
                 buffer.set_text("")
+
+    def steer(self, text, *, queued_entry=None):
+        if self.delivery_pending or self.stopping or not self.turn_id or self.agent() not in NATIVE_AGENTS:
+            return False
+        entry = queued_entry or self.queue_message(text, first=True)
+        if not entry:
+            return False
+        self.delivery_pending = True
+        client, thread_id, turn_id, epoch = self.client, self.thread_id, self.turn_id, self.client_epoch
+        is_claude = self.agent() == 'claude'
+        if is_claude:
+            # The bidirectional Claude protocol offers interrupt, not turn/steer.
+            # Wait for BOTH interrupt acknowledgement and the terminal result.
+            self.redirect_entry = entry
+            self.status.set_text(tr('Interrupting to redirect…'))
+        else:
+            self.outbox.mark(entry, 'sending')
+        self.update_buttons()
+        def accepted(result):
+            if epoch != self.client_epoch:
+                return
+            self.delivery_pending = False
+            if not is_claude:
+                if entry in self.outbox.entries:
+                    self.outbox.remove(entry)
+                self.add_message(tr('You'), text)
+            self.update_buttons()
+            self.drain_queue()
+            self.quit_if_idle()
+        def rejected(message):
+            if epoch != self.client_epoch:
+                return
+            self.delivery_pending = False
+            self.redirect_entry = None
+            self.queue_paused = True
+            if not is_claude:
+                self.outbox.mark(entry, 'uncertain')
+            self.status.set_text(tr('Message kept in queue. Check delivery before retrying.'))
+            self.add_message(tr('Error'), message)
+            self.update_buttons()
+            self.quit_if_idle()
+        self.worker(lambda: client.request('turn/interrupt', {'threadId': thread_id, 'turnId': turn_id})
+                    if is_claude else client.steer(thread_id, turn_id, text), accepted, rejected)
+        return True
 
     def sync(self):
         if not self.settings.get("repository"):
@@ -761,8 +984,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return
         self.submit(tr('Sync'), sync=True)
 
-    def submit(self, text, sync=False, create=False):
-        if self.busy or self.terminal_pid:
+    def submit(self, text, sync=False, create=False, *, queued_entry=None, publish=None):
+        if self.busy or self.terminal_pid or self.delivery_pending:
             self.status.set_text(tr('Stop the current task first.'))
             return False
         if not self.settings.get("repository"):
@@ -775,7 +998,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         try:
             prompt = make_prompt(
                 text, repository=self.settings["repository"], branch=self.settings.get("branch", ""),
-                sync=sync, publish=self.publish.get_active() or create, create=create,
+                sync=sync, publish=(self.publish.get_active() if publish is None else publish) or create, create=create,
                 thread_id=self.thread_id if self.agent() in NATIVE_AGENTS else None,
                 locations=self.locations,
             )
@@ -783,6 +1006,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.failure(str(error))
             return False
         self.last_prompt = prompt
+        self.stopping = False
         self.active_task = begin_task(
             self.locations, self.settings["repository"], self.settings.get("branch", ""),
             "create" if create else "sync" if sync else "change", self.agent(), private_write,
@@ -795,6 +1019,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.close_client()
         self.add_message(tr('You'), text)
         self.busy = True
+        self.delivery_pending = True
+        if queued_entry:
+            self.outbox.mark(queued_entry, 'sending')
         self.status.set_text(tr('Working…') if self.ready else tr('Connecting…'))
         self.update_buttons()
         model, effort = self.selection()
@@ -810,6 +1037,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
                                            model=model, effort=effort, session_id=self.thread_id)
             else:
                 self.client = CodexClient(receive)
+        client = self.client
+        agent, repository, branch = self.agent(), self.settings['repository'], self.settings.get('branch', '')
         def execute():
             # A quick reopen may overlap shutdown of the previous CLI. Wait in
             # the worker, never in the UI, before resuming the same conversation.
@@ -827,11 +1056,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 ui(self.connected_models, models)
             if not self.thread_loaded:
                 result = self.client.start_thread(model, self.settings.get("permissions", "auto"), self.thread_id)
+                previous_thread = self.thread_id
                 self.thread_id = result["thread"]["id"]
                 self.thread_loaded = True
+                ui(self.outbox.bind_thread, agent, repository, branch, previous_thread, self.thread_id)
                 ui(self.save_settings)
             return self.client.turn(self.thread_id, prompt, model, effort)
-        self.worker(execute, lambda r: self.started(r["turn"]["id"]))
+        self.worker(execute, lambda r: self.started(r["turn"]["id"], queued_entry) if client is self.client else None)
         return True
 
     def finish_activity(self, status):
@@ -839,9 +1070,17 @@ class SettingsWindow(Gtk.ApplicationWindow):
         finish_task(self.active_task, status, private_write)
         self.active_task = None
 
-    def started(self, turn_id):
+    def started(self, turn_id, queued_entry=None):
+        self.delivery_pending = False
         if self.busy:
             self.turn_id = turn_id
+        if queued_entry and queued_entry in self.outbox.entries:
+            self.outbox.remove(queued_entry)
+        self.update_buttons()
+        # A fast response may finish before the request acknowledgement arrives.
+        if not self.busy:
+            self.drain_queue()
+            self.quit_if_idle()
 
     def event(self, message):
         method = message.get("method", "")
@@ -862,6 +1101,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.update_buttons()
         elif method == "turn/started":
             self.turn_id = params["turn"]["id"]
+            self.update_buttons()
         elif method == "item/agentMessage/delta":
             identifier = params["itemId"]
             if identifier not in self.cards:
@@ -888,20 +1128,26 @@ class SettingsWindow(Gtk.ApplicationWindow):
                     # Store complete messages, not every streaming fragment.
                     self.message_entries[identifier]["text"] = text
                     self.save_conversation()
+                    self.scroll_down()
                 else:
                     self.add_message(tr('Agent'), text, identifier)
         elif method == "turn/completed":
+            turn = params.get("turn", {})
+            if turn.get('id') and self.turn_id and turn['id'] != self.turn_id:
+                return
             self.busy = False
             self.turn_id = None
-            turn = params.get("turn", {})
-            if turn.get("error"):
-                self.failure(str(turn["error"].get("message", turn["error"])))
+            if turn.get("error") or turn.get('status') == 'failed':
+                self.failure(str((turn.get('error') or {}).get('message', tr('Task failed.'))))
             else:
                 self.status.set_text(tr('Stopped') if turn.get("status") == "interrupted" else tr('Done'))
                 self.finish_activity("interrupted" if turn.get("status") == "interrupted" else "response_completed")
+                if turn.get('status') != 'completed' and not self.redirect_entry:
+                    self.queue_paused = True
+                self.stopping = False
             self.update_buttons()
-            self.refresh_sync_label()
             self.save_settings()
+            self.drain_queue()
             GLib.idle_add(self.quit_if_idle)
         elif method == "client/disconnected":
             self.ready = False
@@ -914,12 +1160,21 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.status.set_text(tr('Reviewing approval…'))
 
     def stop(self):
+        self.queue_paused = True
+        self.redirect_entry = None
         if self.terminal_pid:
             # A real keypress in the PTY preserves the agent's interrupt semantics.
             self.vte.feed_child(b"\x03")
             self.status.set_text(tr('Interrupt sent. Use /exit to close the CLI.'))
         elif self.turn_id:
-            self.worker(lambda: self.client.request("turn/interrupt", {"threadId": self.thread_id, "turnId": self.turn_id}))
+            self.stopping = True
+            client, thread_id, turn_id = self.client, self.thread_id, self.turn_id
+            def failed(message):
+                self.stopping = False
+                self.add_message(tr('Error'), message)
+                self.update_buttons()
+            self.worker(lambda: client.request("turn/interrupt", {"threadId": thread_id, "turnId": turn_id}), failed=failed)
+        self.update_buttons()
 
     def request_from_agent(self, message):
         identifier, method, params = message["id"], message["method"], message.get("params", {})
@@ -1088,7 +1343,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 return
             self.terminal_pid = pid
             self.status.set_text(AGENTS[agent] + tr(' · active'))
-            self.input_area.set_sensitive(False)
             self.update_buttons()
             self.vte.grab_focus()
         self.vte.spawn_async(
@@ -1135,13 +1389,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
         return False
 
     def child_exited(self, _terminal, status):
+        self.queue_paused = True
         self.finish_activity("external_unverified")
         self.terminal_pid = None
         self.busy = False
         self.status.set_text(tr("Session ended · {status}", status=status))
         self.input_area.set_sensitive(True)
         self.update_buttons()
-        self.refresh_sync_label()
         GLib.idle_add(self.quit_if_idle)
 
     def open_terminal(self):
@@ -1149,7 +1403,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         terminal([os.environ.get("SHELL", "/bin/bash")])
 
     def resume_in_terminal(self):
-        if self.busy or self.terminal_pid or not self.thread_id:
+        if self.busy or self.terminal_pid or self.delivery_pending or self.outbox.for_agent(self.agent()) or not self.thread_id:
             return
         self.close_client()
         if self.agent() == "claude":
@@ -1193,6 +1447,12 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.update_attention(force=True)
 
     def new_chat(self):
+        if self.busy or self.terminal_pid or self.delivery_pending:
+            return
+        if self.outbox.for_agent(self.agent()):
+            self.show_queue()
+            return
+        self.queue_paused = False
         self.close_client()
         self.thread_id = None
         self.thread_loaded = False
@@ -1209,13 +1469,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.status.set_text(tr('Ready'))
         self.show_idle_content()
 
-    def refresh_sync_label(self):
-        repository = self.settings.get("repository", "")
-        self.repo_label.set_text(repository.removeprefix("https://github.com/").removesuffix(".git") or tr('Select repository'))
-        self.repo_label.set_tooltip_text(repository)
-
     def setup(self):
-        locked = bool(self.busy or self.terminal_pid)
+        locked = bool(self.busy or self.terminal_pid or self.delivery_pending or self.outbox.entries)
         if self.setup_panel in self.panels:
             return False
         dialog = Panel(self, tr('Settings'))
@@ -1230,17 +1485,19 @@ class SettingsWindow(Gtk.ApplicationWindow):
         branch = Gtk.Entry(placeholder_text=tr('Default branch'))
         branch.set_text(self.settings.get("branch", ""))
         content.append(self.control(tr('Branch'), branch))
-        agent = dropdown([AGENTS[a] for a in self.agent_ids])
-        agent.set_selected(self.agent_select.get_selected())
-        content.append(self.control(tr('Agent'), agent))
+        if self.model_info.get_parent():
+            self.model_info.get_parent().remove(self.model_info)
+        content.append(self.model_info)
         mode = dropdown([tr('Auto review'), tr('Ask for approval'), tr('Read only')])
         modes = ["auto", "ask", "read"]
         current_mode = self.settings.get("permissions", "auto")
         mode.set_selected(modes.index(current_mode) if current_mode in modes else 0)
         content.append(self.control(tr('Codex permissions'), mode))
         error_label = label("")
+        error_label.set_visible(False)
         content.append(error_label)
         buttons = box(False, 10)
+        buttons.set_homogeneous(True)
         def save(create=False):
             try:
                 value = repository_url(repository.get_text())
@@ -1249,19 +1506,19 @@ class SettingsWindow(Gtk.ApplicationWindow):
                     raise ValueError(tr('Invalid branch.'))
             except ValueError as error:
                 error_label.set_text(str(error))
+                error_label.set_visible(True)
                 return
             changed = value != self.settings.get("repository") or branch_value != self.settings.get("branch", "")
             self.settings.update(repository=value, branch=branch_value, permissions=modes[mode.get_selected()])
             self.thread_loaded = False
-            self.agent_select.set_selected(agent.get_selected())
             if changed:
                 self.new_chat()
             self.save_settings()
-            self.refresh_sync_label()
             dialog.destroy()
             if create:
                 self.submit(tr('Create my configuration repository'), create=True)
         existing = Gtk.Button(label=tr('Use repository'))
+        existing.set_hexpand(True)
         existing.add_css_class("suggested-action")
         existing.connect("clicked", lambda *_: save())
         create = Gtk.Button(label=tr('Create with agent'))
@@ -1274,9 +1531,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
         resume.connect("clicked", lambda *_: self.resume_in_terminal())
         content.append(resume)
         if locked:
-            for widget in (repository, branch, agent, mode, existing, create):
+            for widget in (repository, branch, mode, existing, create):
                 widget.set_sensitive(False)
-            error_label.set_text(tr('Settings can be changed after the current task finishes.'))
+            error_label.set_text(tr('Finish the task and send or remove queued messages before changing settings.'))
+            error_label.set_visible(True)
         dialog.present()
         return False
 
@@ -1311,7 +1569,7 @@ class Application(Gtk.Application):
                 self.window.dismiss()
             return 0
         if "--quit" in arguments:
-            if self.window and (self.window.busy or self.window.terminal_pid or self.window.question_windows):
+            if self.window and (self.window.busy or self.window.terminal_pid or self.window.question_windows or self.window.delivery_pending):
                 return 1
             if self.window and self.window.client:
                 self.window.client.close()

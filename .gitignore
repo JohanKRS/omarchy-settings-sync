@@ -9,6 +9,7 @@ last-sync.json
 attention.json
 model-catalog.json
 activity.json
+outbox.json
 .env
 .env.*
 !.env.example

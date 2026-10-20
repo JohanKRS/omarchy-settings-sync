@@ -12,7 +12,7 @@ back to your configuration repository, ready for the next installation to sync.
 The plugin's source repository and your personal configuration repository are
 separate.
 
-<p align="center"><img src="preview.png" width="560" alt="Omarchy Settings Sync panel with a configuration repository, Sync button and agent selectors"></p>
+<p align="center"><img src="preview.png" width="560" alt="Omarchy Settings Sync panel with a compact Sync header, agent selectors and message field"></p>
 
 ## Sync between installations
 
@@ -72,18 +72,45 @@ URL. An empty branch uses the repository's default branch. See the
 | Settings icon, right click | No action |
 | **Sync** | Ask the agent to sync the configured repository onto this installation |
 | Message field | Request a specific change; optionally publish its reusable configuration |
+| **Enter / Send / Queue** | The same button sends when idle and queues while an agent is working |
+| Queue count (shown only with pending messages) | Review, pause/resume, edit or remove saved follow-ups; use **Direct now** on a queued message |
+| **Ctrl+Enter** during native work | Steer Codex's current turn; interrupt and continue Claude in the same conversation |
+| **Copy to terminal** on a queued external message, or **Ctrl+Enter** | Copy a follow-up; paste into the agent input and use that CLI's send/queue controls |
 | **Push changes** | Authorize the agent to publish reusable changes to your configuration repository after validation; enabled by default |
 | Agent, model, effort | Choose before starting; selections are remembered per agent |
 | **?** in the bar | Codex or Claude is waiting for an answer or permission |
 | **Stop** | Interrupt a native conversation, or send Ctrl+C to an embedded CLI |
 | Terminal icon | Open a companion shell in the workspace, including during a task |
-| Settings | Inspect settings anytime; change them when the task has finished |
+| Settings | Configure the repository and permissions; inspect or refresh the installed agent's models |
 | **Continue conversation in terminal** | Resume an idle Codex/Claude conversation in its CLI |
 | New chat | Archive the current local conversation and start a fresh one |
 
-Escape closes the topmost question, settings panel or selector first. Otherwise,
-Escape or a click outside hides the panel. Hiding an active task does not stop it.
+Escape closes the topmost question, settings panel or selector first. When an
+embedded terminal has focus, Escape goes to the CLI for its own controls.
+Otherwise, Escape or a click outside hides the panel. Hiding an active task does not stop it.
 Questions support options and free text; Claude also supports multiple selections.
+Shift+Enter inserts a newline in the panel's message field.
+The conversation follows newly laid-out text without clipping the final line,
+and stops following when you scroll up to read. Scrolling past an edge moves
+the text slightly and springs back, without the GTK edge glow. The animation
+respects the desktop's reduced-motion setting.
+
+Follow-ups are saved locally per agent, repository, branch and conversation.
+**Stop**, a failed task or a disconnected client pauses automatic sending.
+After reopening the application, open the queue count and choose **Resume queue** to continue.
+If delivery was not confirmed, review the conversation before editing and
+retrying that message. Editing preserves an existing composer draft; clear or
+queue the draft first. Send or remove pending messages before starting a new
+chat or changing repositories.
+
+All supported agents have the local queue. Codex and Claude have automatic
+dispatch because their native connections report response boundaries. Other
+agents run inside a terminal: use **Copy to terminal**, paste with Ctrl+Shift+V
+into the agent's message input, then use its own send, queue or interrupt keys.
+The copied message stays in the panel queue until you remove it. The panel
+cannot detect those CLIs' response boundaries and does not automatically type
+messages or press Enter into a terminal that might be asking for permission.
+Their native support for mid-response messages varies by CLI and version.
 
 ## Agent support
 
@@ -131,6 +158,7 @@ renaming does not reset your settings or conversations.
 | --- | --- |
 | `~/.config/omarchy-agent-settings/settings.json` | Repository, branch, selections and conversation IDs |
 | `~/.local/state/omarchy-agent-settings/` | Conversations, activity records, logs, model cache and backups |
+| `~/.local/state/omarchy-agent-settings/outbox.json` | Unsent follow-ups, including messages with unconfirmed delivery |
 | `~/.local/share/omarchy-agent-settings/workspace/` | Working copies of configuration repositories |
 
 The corresponding `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_DATA_HOME` overrides

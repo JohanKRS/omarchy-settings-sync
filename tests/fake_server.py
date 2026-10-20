@@ -25,6 +25,11 @@ for line in sys.stdin:
         result = {"thread": {"id": params.get("threadId", "thread-test")}, "received": params}
     elif method == "turn/start":
         result = {"turn": {"id": "turn-test"}, "received": params}
+    elif method == "turn/steer":
+        if params.get('expectedTurnId') != 'turn-test':
+            send({'id': identifier, 'error': {'code': -32602, 'message': 'Turn mismatch'}})
+            continue
+        result = {'turnId': params['expectedTurnId'], 'received': params}
     elif method == "test/error":
         send({"id": identifier, "error": {"code": -1, "message": "expected error"}})
         continue
