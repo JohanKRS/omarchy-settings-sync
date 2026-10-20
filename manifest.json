@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "id": "community.agent-settings",
-  "name": "Agent Settings",
-  "version": "0.1.0",
+  "name": "Omarchy Settings",
+  "version": "0.1.1",
   "description": "Adjust and sync your Omarchy with your local agent and configuration repository.",
   "kinds": ["bar-widget"],
   "entryPoints": {"barWidget": "plugin/BarWidget.qml"},
   "barWidget": {
-    "displayName": "Agent Settings",
+    "displayName": "Omarchy Settings",
     "description": "Adjust your system and sync your settings",
     "category": "System",
     "defaultSection": "right",

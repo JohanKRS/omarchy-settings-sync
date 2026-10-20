@@ -30,9 +30,9 @@ BarWidget {
     bar: root.bar
     text: "\uf1de"
     slotSize: Style.bar.statusSlot
-    tooltipText: root.language === "pt" ? "Agent Settings\nAbrir · botão direito: sincronizar"
-               : root.language === "es" ? "Agent Settings\nAbrir · clic derecho: sincronizar"
-               : "Agent Settings\nOpen · right-click to sync"
+    tooltipText: root.language === "pt" ? "Omarchy Settings\nAbrir · botão direito: sincronizar"
+               : root.language === "es" ? "Omarchy Settings\nAbrir · clic derecho: sincronizar"
+               : "Omarchy Settings\nOpen · right-click to sync"
     onPressed: function(mouseButton) { root.launch(mouseButton === Qt.RightButton) }
   }
 }

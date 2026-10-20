@@ -149,7 +149,7 @@ def make_prompt(task, *, repository, branch="", sync=False, publish=True, create
             "WORKFLOW.md indicado acima e atualize sync_record_path somente após validar."
         )
     return (
-        f"Pedido enviado pelo usuário no plugin Agent Settings:\n{action}\n\n"
+        f"Pedido enviado pelo usuário no plugin Omarchy Settings:\n{action}\n\n"
         f"Idioma da interface: {LANGUAGE}. Responda nesse idioma, a menos que o usuário peça outro.\n"
         f"Repositório de CONFIGURAÇÕES autorizado: {repository}\n"
         f"Branch: {branch or 'a branch padrão informada pelo remoto'}\n"
@@ -200,7 +200,7 @@ class CodexClient:
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
         self.request("initialize", {
-            "clientInfo": {"name": "omarchy_agent_settings", "title": "Agent Settings", "version": "0.1.0"},
+            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings", "version": "0.1.1"},
             "capabilities": {"experimentalApi": True},
         })
         self.notify("initialized", {})
@@ -261,12 +261,17 @@ class CodexClient:
     def close(self):
         self.closed = True
         if self.process and self.process.poll() is None:
-            self.process.terminate()
+            # EOF lets app-server close its MCP workers before the UI exits.
+            self.process.stdin.close()
             try:
                 self.process.wait(timeout=3)
             except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=3)
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=3)
         if self.stderr_file:
             self.stderr_file.close()
         if self.process:
@@ -351,6 +356,6 @@ def terminal(command, workspace=None):
     cwd = str(workspace or paths()["workspace"])
     Path(cwd).mkdir(parents=True, exist_ok=True)
     return subprocess.Popen(
-        ["xdg-terminal-exec", "--title=Agent Settings", f"--dir={cwd}", "--", *command],
+        ["xdg-terminal-exec", "--title=Omarchy Settings", f"--dir={cwd}", "--", *command],
         start_new_session=True,
     )

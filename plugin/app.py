@@ -115,7 +115,7 @@ class Panel(Gtk.Box):
 
 class SettingsWindow(Gtk.ApplicationWindow):
     def __init__(self, application):
-        super().__init__(application=application, title="Agent Settings · Omarchy")
+        super().__init__(application=application, title="Omarchy Settings")
         self.set_decorated(False)
         self.add_css_class("popup-host")
         LayerShell.init_for_window(self)
@@ -145,8 +145,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.messages = []
         self.question_windows = {}
         self.terminal_pid = None
-        self.pending_sync = False
-        self.pending_create = False
         self.last_prompt = ""
         self.active_task = None
         self.session_file = self.locations["state"] / "conversation.json"
@@ -194,7 +192,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         icon = Gtk.Image.new_from_icon_name("preferences-system-symbolic")
         icon.set_pixel_size(26)
         header.append(icon)
-        title = label("Agent Settings", "title")
+        title = label("Omarchy Settings", "title")
         title.set_hexpand(True)
         header.append(title)
         settings_button = Gtk.Button(icon_name="emblem-system-symbolic", tooltip_text=tr('Settings'))
@@ -356,6 +354,16 @@ class SettingsWindow(Gtk.ApplicationWindow):
     def dismiss(self):
         self.save_settings()
         self.set_visible(False)
+        self.quit_if_idle()
+
+    def quit_if_idle(self):
+        if self.get_visible() or self.busy or self.terminal_pid:
+            return False
+        if self.client:
+            self.client.close()
+            self.client = None
+        self.get_application().quit()
+        return False
 
     def agent(self):
         return self.agent_ids[self.agent_select.get_selected()]
@@ -385,8 +393,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if agent == "codex":
             self.content.set_visible_child_name("chat")
             self.update_models(self.models)
-            if not self.client:
-                self.connect_codex()
+            self.status.set_text(tr('Ready'))
         else:
             self.content.set_visible_child_name("terminal" if self.vte else "chat")
             saved = self.settings.get("selections", {}).get(agent, {})
@@ -431,37 +438,17 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 ui(self.failure, str(error))
         threading.Thread(target=work, daemon=True).start()
 
-    def connect_codex(self):
-        if not shutil.which("codex"):
-            self.status.set_text(tr('Install Codex or choose another agent.'))
-            return
-        self.status.set_text(tr('Connecting…'))
-        self.client = CodexClient(lambda message: ui(self.event, message))
-        def connect():
-            self.client.start()
-            return self.client.models()
-        def connected(models):
-            self.ready = True
-            self.models = models
-            if self.agent() == "codex":
-                self.update_models(models)
-                self.status.set_text(tr('Codex · ') + self.mode_label())
-            self.update_buttons()
-            if self.pending_sync:
-                self.pending_sync = False
-                self.sync()
-            elif self.pending_create:
-                self.pending_create = False
-                self.submit(tr('Create my configuration repository'), create=True)
-        self.worker(connect, connected)
+    def connected_models(self, models):
+        self.models = models
+        if self.agent() == "codex":
+            self.update_models(models)
 
     def mode_label(self):
         return {"auto": tr('auto review'), "ask": tr('ask for approval'), "read": tr('read only')}.get(
             self.settings.get("permissions", "auto"), tr('auto review'))
 
     def update_buttons(self):
-        native = self.agent() == "codex"
-        available = not self.busy and not self.terminal_pid and (self.ready or not native)
+        available = not self.busy and not self.terminal_pid
         self.send_button.set_sensitive(available)
         self.sync_button.set_sensitive(available)
         self.new_button.set_sensitive(not self.busy and not self.terminal_pid)
@@ -510,6 +497,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.status.set_text(tr('Needs attention'))
         self.add_message(tr('Error'), message)
         self.update_buttons()
+        GLib.idle_add(self.quit_if_idle)
 
     def send(self, *_):
         buffer = self.input.get_buffer()
@@ -522,9 +510,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if not self.settings.get("repository"):
             self.setup()
             return
-        if self.agent() == "codex" and not self.ready:
-            self.pending_sync = True
-            return
         self.submit(tr('Sync'), sync=True)
 
     def submit(self, text, sync=False, create=False):
@@ -533,6 +518,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return False
         if not self.settings.get("repository"):
             self.setup()
+            return False
+        if self.agent() == "codex" and not shutil.which("codex"):
+            self.failure(tr('Install Codex or choose another agent.'))
             return False
         self.save_settings()
         try:
@@ -553,15 +541,25 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.agent() != "codex":
             self.launch_external(prompt)
             return True
-        if not self.ready:
-            self.failure(tr('Waiting for Codex…'))
-            return False
         self.add_message(tr('You'), text)
         self.busy = True
-        self.status.set_text(tr('Working…'))
+        self.status.set_text(tr('Working…') if self.ready else tr('Connecting…'))
         self.update_buttons()
         model, effort = self.selection()
+        if not self.client:
+            self.client = CodexClient(lambda message: ui(self.event, message))
         def execute():
+            if not self.ready:
+                try:
+                    self.client.start()
+                    models = self.client.models()
+                except Exception:
+                    self.client.close()
+                    self.client = None
+                    self.thread_loaded = False
+                    raise
+                self.ready = True
+                ui(self.connected_models, models)
             if not self.thread_loaded:
                 result = self.client.start_thread(model, self.settings.get("permissions", "auto"), self.thread_id)
                 self.thread_id = result["thread"]["id"]
@@ -629,8 +627,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.update_buttons()
             self.refresh_sync_label()
             self.save_settings()
+            GLib.idle_add(self.quit_if_idle)
         elif method == "client/disconnected":
             self.ready = False
+            self.thread_loaded = False
             self.failure(tr('Disconnected. Reopen the window to reconnect.'))
         elif method == "error":
             self.add_message("Codex", str(params.get("message", params.get("error", params))))
@@ -801,6 +801,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.input_area.set_visible(True)
         self.update_buttons()
         self.refresh_sync_label()
+        GLib.idle_add(self.quit_if_idle)
 
     def open_terminal(self):
         if self.busy or self.terminal_pid:
@@ -884,11 +885,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.refresh_sync_label()
             dialog.destroy()
             if create:
-                if self.agent() == "codex" and not self.ready:
-                    self.pending_create = True
-                    self.status.set_text(tr('Connecting…'))
-                else:
-                    self.submit(tr('Create my configuration repository'), create=True)
+                self.submit(tr('Create my configuration repository'), create=True)
         existing = Gtk.Button(label=tr('Use repository'))
         existing.add_css_class("suggested-action")
         existing.connect("clicked", lambda *_: save())

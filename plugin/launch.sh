@@ -6,7 +6,7 @@ install_attempted=0
 if [[ ${1:-} == --install-dependencies ]]; then
   shift
   install_attempted=1
-  printf '%s\n' 'Agent Settings: installing GTK4 + VTE…'
+  printf '%s\n' 'Omarchy Settings: installing GTK4 + VTE…'
   omarchy pkg add python-gobject gtk4 vte4 gtk4-layer-shell
 fi
 
@@ -16,7 +16,7 @@ if ! python3 -c 'from ctypes import CDLL; CDLL("libgtk4-layer-shell.so"); import
     read -r -p 'Press Enter to close.' || true
     exit 1
   fi
-  exec xdg-terminal-exec --title='Agent Settings' -- \
+  exec xdg-terminal-exec --title='Omarchy Settings' -- \
     bash "$plugin_dir/launch.sh" --install-dependencies "$@"
 fi
 exec python3 "$plugin_dir/app.py" "$@"

@@ -34,11 +34,12 @@ def wait(predicate, timeout=8):
 with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
     env = {key: str(Path(temp) / name) for key, name in [
         ("XDG_CONFIG_HOME", "config"), ("XDG_STATE_HOME", "state"), ("XDG_DATA_HOME", "data")]}
-    with patch.dict(os.environ, env), patch.object(SettingsWindow, "connect_codex"):
+    with patch.dict(os.environ, env), patch("app.CodexClient") as client_constructor:
         application = Gtk.Application(application_id="org.omarchy.AgentSettings.Test")
         application.register(None)
         window = SettingsWindow(application)
         window.present()
+        client_constructor.assert_not_called()
         wait(lambda: bool(window.panels))
         assert LayerShell.is_layer_window(window)
         assert not window.get_decorated()
@@ -52,6 +53,7 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         next(w for w in buttons if w.get_label() == tr("Use repository")).emit("clicked")
         assert window.settings["repository"] == "https://github.com/sample/dotfiles"
         assert not window.panels
+        assert window.send_button.get_sensitive(), "First request can start Codex on demand"
         window.ready = True
         window.update_models([{"model": "sample-model", "displayName": "Sample model",
                                "supportedReasoningEfforts": [{"reasoningEffort": "low"}, {"reasoningEffort": "high"}]}])
@@ -74,6 +76,32 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             window.event({"method": "item/completed", "params": {"item": {"type": "agentMessage", "id": ident, "text": ident + " done"}}})
         assert window.message_entries["a"]["text"] == "a done"
         assert window.message_entries["b"]["text"] == "b done"
+        # The first submission starts the backend, preserving the selected controls.
+        window.client = None
+        window.ready = False
+        backend = client_constructor.return_value
+        backend.models.return_value = [{"model": "sample-model", "displayName": "Sample model",
+                                       "supportedReasoningEfforts": [{"reasoningEffort": "high"}]}]
+        backend.start_thread.return_value = {"thread": {"id": "test-thread"}}
+        backend.turn.return_value = {"turn": {"id": "test-turn"}}
+        with patch("app.shutil.which", return_value="/usr/bin/codex"):
+            assert window.submit("Test lazy startup")
+        wait(lambda: window.turn_id == "test-turn")
+        backend.start.assert_called_once()
+        assert backend.turn.call_args.args[2:] == ("sample-model", "high")
+        window.event({"method": "turn/completed",
+                      "params": {"threadId": "test-thread", "turn": {"status": "completed"}}})
+        assert not window.busy
+        # A failed connection must close its backend and allow a fresh attempt.
+        window.client = None
+        window.ready = False
+        backend.start.side_effect = RuntimeError("Test connection failure")
+        with patch("app.shutil.which", return_value="/usr/bin/codex"):
+            assert window.submit("Test failure cleanup")
+        wait(lambda: not window.busy)
+        assert window.client is None
+        assert not window.thread_loaded
+        backend.close.assert_called_once()
         if Vte:
             window.agent_select.set_selected(window.agent_ids.index("claude"))
             with patch("app.external_command", return_value=[sys.executable, "-c", "import time; print('terminal-ok',flush=True); time.sleep(.4)"]), patch("app.shutil.which", return_value=sys.executable):
@@ -84,14 +112,23 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
                 wait(lambda: window.terminal_pid is None)
                 assert window.send_button.get_sensitive()
         window.client = None
-        window.popup_key(None, Gdk.KEY_Escape, 0, 0)
-        assert not window.get_visible()
-        window.present()
-        wait(lambda: window.get_visible())
-        class Gesture:
-            def set_state(self, state): self.state = state
-        window.popup_click(Gesture(), 1, 0, 0)
-        assert not window.get_visible()
+        with patch.object(window, "quit_if_idle") as cleanup:
+            window.popup_key(None, Gdk.KEY_Escape, 0, 0)
+            assert not window.get_visible()
+            cleanup.assert_called_once()
+            window.present()
+            wait(lambda: window.get_visible())
+            class Gesture:
+                def set_state(self, state): self.state = state
+            window.popup_click(Gesture(), 1, 0, 0)
+            assert not window.get_visible()
+        with patch.object(application, "quit") as quit_app:
+            window.busy = True
+            window.quit_if_idle()
+            quit_app.assert_not_called()
+            window.busy = False
+            window.quit_if_idle()
+            quit_app.assert_called_once()
         GLib.source_remove(window.theme_timer)
         window.destroy()
         print("UI smoke passed: layer popup, setup, controls, approvals, streaming, terminal, dismissal")

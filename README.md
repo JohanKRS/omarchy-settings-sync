@@ -1,4 +1,4 @@
-# Agent Settings for Omarchy
+# Omarchy Settings
 
 Um botão na barra do Omarchy que abre um painel suspenso para conversar com
 seu agente, ajustar o sistema e sincronizar preferências entre computadores.
@@ -94,6 +94,11 @@ Inclua um `README.md` e, de preferência, `SYNC.md` com:
 - dependências, comandos de validação e condições de hardware;
 - preferências que devem continuar locais.
 
+Para um repositório novo, o agente recebe a orientação de agrupar aplicativos em
+`apps/`, ajustes do desktop em `desktop/` e do sistema em `system/`, com scripts,
+testes e instruções dentro de cada componente. Os arquivos nativos são a fonte
+das configurações; repositórios existentes mantêm sua própria organização.
+
 Pode usar HTTPS, SSH ou `usuario/repositorio`; branch vazia usa a padrão.
 O setup de repositório novo pede ao agente um repositório **privado**. Tokens,
 cookies, sessões, perfis completos, históricos e modelos baixados não devem
@@ -110,8 +115,12 @@ Respeita `XDG_CONFIG_HOME`, `XDG_STATE_HOME` e `XDG_DATA_HOME`.
 | `~/.local/share/omarchy-agent-settings/workspace/` | Área de trabalho e cópia do repositório |
 
 Esses dados ficam locais. O plugin não tem servidor web, telemetria nem API key
-própria. Fechar a janela durante uma tarefa apenas a oculta; clique novamente
-no ícone para acompanhar.
+própria. O ícone inicia junto com a barra; o painel só inicia ao clicar. Abrir
+o painel usa a lista de modelos em cache, sem iniciar Codex nem suas conexões.
+O agente é carregado ao enviar um pedido. Fechar o painel ocioso encerra seus
+processos; durante uma tarefa, apenas o oculta, liberando-os ao terminar.
+Uma CLI externa aberta continua até encerrar sua sessão. Clique novamente
+no ícone para acompanhar. A conversa é retomada pelo histórico salvo.
 
 ## Desenvolvimento
 

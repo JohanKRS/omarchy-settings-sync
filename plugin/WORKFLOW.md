@@ -1,6 +1,7 @@
 # Workflow: ajustes do sistema e sincronização
 
-Você trabalha para o usuário no Omarchy desta máquina. Use o agente, modelo,
+Você configura o sistema operacional, seus aplicativos e os próprios agentes
+conforme o pedido do usuário no Omarchy desta máquina. Use o agente, modelo,
 autenticação, ferramentas, plugins e conexões configurados localmente.
 Responda no idioma do usuário. O pedido identifica o repositório de
 CONFIGURAÇÕES autorizado. Ele é independente do código deste plugin.
@@ -37,7 +38,9 @@ local, não prova de que o remoto está acessível ou de que uma tarefa terminou
 
 Não peça informações já presentes no repositório, no contexto ou na máquina.
 Se o remoto mudou, encontre os componentes afetados entre o último commit e
-o novo HEAD. Aplique o delta e suas dependências, preservando o restante.
+o novo HEAD, reconhecendo renomes de arquivos. Mudanças somente em documentação
+ou na organização das pastas não exigem reinstalação dos destinos equivalentes.
+Aplique o delta e suas dependências, preservando o restante.
 Se os arquivos já correspondem ao novo HEAD, apenas reconheça essa adoção e
 registre o novo ponto de referência, sem reescritas ou recargas desnecessárias.
 
@@ -125,6 +128,13 @@ substitua repositório existente. Prepare README, SYNC.md com mapeamento
 origem→destino e condições de hardware, .gitignore e personalizações portáveis.
 Não faça uma captura indiscriminada da pasta pessoal. O repositório do PLUGIN
 não é destino para essas configurações.
+Em um repositório novo, prefira arquivos nativos em `apps/<aplicativo>/`,
+`desktop/<componente>/` e `system/<componente>/`, com os scripts, testes e README
+junto ao componente correspondente. Documente origens, destinos, trechos a
+mesclar e dependências reais em SYNC.md. Evite opções duplicadas, blobs,
+submódulos e dependência em outros projetos pessoais quando os arquivos nativos
+ou um pequeno auxiliar incluído no próprio componente bastarem. Em um
+repositório existente, mantenha sua organização salvo pedido de reorganização.
 
 ## Acesso e continuidade
 
