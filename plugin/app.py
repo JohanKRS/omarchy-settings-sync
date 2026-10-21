@@ -581,7 +581,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         else:
             self.empty_title.set_text(AGENTS[self.agent()])
             self.empty_description.set_text(
-                tr('Describe a change to your Omarchy. Save it here, then sync your other machines.') if self.executables[self.agent()]
+                tr('Describe a change to your system or apps. Save it to your repository and sync your other Omarchy machines.') if self.executables[self.agent()]
                 else tr('Install {agent} from the Omarchy agent menu.', agent=AGENTS[self.agent()]))
             self.content.set_visible_child_name("empty")
 
@@ -1588,7 +1588,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.model_info.get_parent():
             self.model_info.get_parent().remove(self.model_info)
         content.append(self.model_info)
-        about = label(tr('Configure Omarchy with your agent and save changes to your repository. Sync them to your other Omarchy machines.'), 'muted')
+        about = label(tr('Configure your system and apps, including third-party apps, with your agent. Save changes to your repository and sync your Omarchy machines.'), 'muted')
         about.set_max_width_chars(48)
         content.append(about)
         repository = Gtk.Entry(placeholder_text=tr('owner/dotfiles'))
@@ -1644,13 +1644,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
         buttons.append(existing)
         buttons.append(create)
         content.append(buttons)
-        extras = Gtk.Expander(label=tr('Extras'))
         review = Gtk.Button(label=tr('Review existing customizations'))
         review.set_tooltip_text(tr('Find portable changes already on this machine and choose what to save to your repository.'))
         review.set_sensitive(not locked and bool(self.executables[self.agent()]))
         review.connect('clicked', lambda *_: save(review_existing=True))
-        extras.set_child(review)
-        content.append(extras)
+        content.append(review)
         resume = Gtk.Button(label=tr('Continue conversation in terminal'))
         resume.set_sensitive(not locked and bool(self.thread_id) and self.agent() in NATIVE_AGENTS)
         resume.connect("clicked", lambda *_: self.resume_in_terminal())

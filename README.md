@@ -1,14 +1,14 @@
 # Omarchy Settings Sync
 
-**Configure Omarchy with your agent. Take your changes to your other machines.**
+**Configure your system and apps with your agent. Sync your Omarchy machines.**
 
-Describe a change in the panel. Your local agent configures this machine and,
-with **Push changes** enabled, saves the reusable settings in your own Git
-repository. On another Omarchy machine, select the same repository and click
+Describe a change to the system, an Omarchy app or a third-party app. Your local
+agent configures this machine and, with **Push changes** enabled, saves reusable
+settings in your own Git repository. On another Omarchy machine, select the same repository and click
 **Sync** to apply them. Your configuration repository stays separate from the
 plugin's source code.
 
-Already customized your system? **[Settings](docs/settings.png) → Extras → Review existing
+Already customized your system or apps? **[Settings](docs/settings.png) → Review existing
 customizations** asks the agent to find portable changes and lets you choose
 what to save.
 
@@ -23,7 +23,7 @@ Examples use synthetic data.
 | --- | --- |
 | [![Conversation and queued follow-ups](docs/conversation.png)](docs/conversation.png) | [![Clickable conversation alternatives](docs/choices.png)](docs/choices.png) |
 
-| Structured questions | Settings and extras |
+| Structured questions | Settings |
 | --- | --- |
 | [![Native question with options and free text](docs/questions.png)](docs/questions.png) | [![Settings with optional customization review](docs/settings.png)](docs/settings.png) |
 
@@ -102,7 +102,7 @@ URL. An empty branch uses the repository's default branch. See the
 | Stop icon, beside Send/Queue while working | Interrupt a native conversation, or send Ctrl+C to an embedded CLI |
 | Terminal icon | Open a companion shell in the workspace, including during a task |
 | Settings | Configure the repository and permissions; inspect or refresh the installed agent's models |
-| **Settings → Extras → Review existing customizations** | Find portable settings already on this machine and choose what to save to the configured repository |
+| **Settings → Review existing customizations** | Find portable system and app settings already on this machine and choose what to save to the configured repository |
 | **Continue conversation in terminal** | Resume an idle Codex/Claude conversation in its CLI |
 | New chat | Archive the current local conversation and start a fresh one |
 | Down arrow in the conversation | Shown while reading older messages; jump to the latest message and resume following replies |

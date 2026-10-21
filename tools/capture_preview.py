@@ -65,10 +65,9 @@ with tempfile.TemporaryDirectory(prefix='omarchy-settings-preview-') as temp:
         settle()
         window.setup()
         settle()
-        extras = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Expander))
-        extras.set_expanded(True)
-        settle()
-        assert extras.get_child().get_mapped(), 'Settings extra must be visible in the preview'
+        review = next(w for w in widgets(window.setup_panel)
+                      if isinstance(w, Gtk.Button) and w.get_label() == 'Review existing customizations')
+        assert review.get_mapped(), 'Customization review must be visible in Settings'
         subprocess.run(['grim', '-g', region, str(ROOT / 'docs/settings.png')], check=True)
         window.setup_panel.on_close()
         window.client = Mock()

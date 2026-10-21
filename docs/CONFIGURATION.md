@@ -6,8 +6,9 @@ An existing repository can keep its current layout and installation strategy.
 
 ## Bring existing customizations
 
-Use **Settings → Extras → Review existing customizations** to ask the agent to
-compare current settings with Omarchy's installed defaults and your repository.
+Use **Settings → Review existing customizations** to ask the agent to compare
+current system and app settings with available defaults and your repository.
+This includes apps bundled with Omarchy and third-party apps installed later.
 It summarizes portable candidates and asks what to include before saving them.
 This is a review of current files, not a complete history of past changes.
 Active settings stay in place; publishing still follows **Push changes**.

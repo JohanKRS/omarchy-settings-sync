@@ -75,15 +75,13 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         # and uses the repository entered in the form.
         with patch.object(window, 'submit', return_value=True) as submit_review:
             window.setup()
-            extras = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Expander))
-            assert not extras.get_expanded()
             submit_review.assert_not_called()
-            review = extras.get_child()
-            assert review.get_label() == tr('Review existing customizations') and review.get_sensitive()
+            review = next(w for w in widgets(window.setup_panel)
+                          if isinstance(w, Gtk.Button) and w.get_label() == tr('Review existing customizations'))
+            assert review.get_sensitive()
+            wait(lambda: review.get_mapped() and review.get_height() > 0)
             entries = [w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Entry)]
             entries[0].set_text('invalid')
-            extras.set_expanded(True)
-            wait(lambda: review.get_mapped() and review.get_height() > 0)
             review.emit('clicked')
             submit_review.assert_not_called()
             assert window.setup_panel in window.panels
@@ -475,7 +473,8 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
                 terminal.assert_called_once_with([os.environ.get("SHELL", "/bin/bash")])
             window.setup()
             assert all(not w.get_sensitive() for w in widgets(window.setup_panel) if isinstance(w, Gtk.Entry))
-            review = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Expander)).get_child()
+            review = next(w for w in widgets(window.setup_panel)
+                          if isinstance(w, Gtk.Button) and w.get_label() == tr('Review existing customizations'))
             assert not review.get_sensitive()
             window.setup_panel.on_close()
             with patch.object(application, "quit") as quit_app:

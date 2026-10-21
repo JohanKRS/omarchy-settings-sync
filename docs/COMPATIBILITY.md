@@ -75,6 +75,13 @@ accounts have not been exercised in this environment.
 
 ## Follow-up support
 
+The 0.1.10 update makes the existing-customization review visible directly in
+Settings and clarifies that system, bundled-app and third-party app settings
+can be synchronized. All 46 portable tests, the Portuguese graphical test and
+the launcher smoke test pass. The graphical fixture verifies that the review
+button is visible immediately, validates its repository and stays disabled
+during active work. Updated previews use synthetic data.
+
 The 0.1.9 update directs Codex and Claude Code to their native structured question
 tools in the shared workflow and in every request, including the short sync
 path. Codex thread start/resume sets `features.default_mode_request_user_input`

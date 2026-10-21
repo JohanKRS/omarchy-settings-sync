@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.10 — 2026-10-21
+
+- Clarify that configuration and sync cover the system, Omarchy apps and
+  third-party apps. Include those apps in the existing-customization review.
+- Show **Review existing customizations** directly in Settings, without a
+  collapsed Extras section. Update translations, documentation and screenshots.
+
 ## 0.1.9 — 2026-10-21
 
 - Explain the configure, save and sync workflow in the panel and documentation.

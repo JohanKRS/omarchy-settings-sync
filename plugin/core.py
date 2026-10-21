@@ -125,8 +125,9 @@ def make_prompt(task, *, repository, branch="", sync=False, publish=True, create
         )
     if review_existing:
         action = (
-            "REVISAR PERSONALIZAÇÕES ATUAIS. Examine as configurações relevantes deste "
-            "Omarchy e compare com os padrões instalados e o repositório configurado. "
+            "REVISAR PERSONALIZAÇÕES ATUAIS. Examine as configurações relevantes do sistema, "
+            "dos aplicativos do Omarchy e dos aplicativos de terceiros instalados. "
+            "Compare com os padrões disponíveis e o repositório configurado. "
             "Identifique alterações portáteis que ainda não estão documentadas no repositório. "
             "Não é possível reconstruir com certeza o histórico de alterações: indique "
             "incertezas e não trate toda diferença como uma personalização intencional. "
@@ -218,7 +219,7 @@ class CodexClient:
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
         self.request("initialize", {
-            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.1.9"},
+            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.1.10"},
             "capabilities": {"experimentalApi": True},
         })
         self.notify("initialized", {})

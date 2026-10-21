@@ -2,15 +2,15 @@
   "schemaVersion": 1,
   "id": "community.agent-settings",
   "name": "Omarchy Settings Sync",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "author": "JohanKRS",
   "license": "MIT",
-  "description": "Configure Omarchy with your agent, save changes to your repository, and sync them to your other machines.",
+  "description": "Configure your system and apps, including third-party apps, with your agent. Save changes to your repository and sync across Omarchy machines.",
   "kinds": ["bar-widget"],
   "entryPoints": {"barWidget": "plugin/BarWidget.qml"},
   "barWidget": {
     "displayName": "Omarchy Settings Sync",
-    "description": "Configure Omarchy with your agent and sync your changes across machines",
+    "description": "Configure your system and apps with your agent and sync across Omarchy machines",
     "category": "System",
     "defaultSection": "right",
     "allowMultiple": false

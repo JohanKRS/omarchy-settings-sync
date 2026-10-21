@@ -134,9 +134,8 @@
   "Copy the request, then paste it into the agent input and send.": "Copie o pedido, cole no campo de mensagem do agente e envie.",
   "Opened in terminal. Copy and paste the request.": "Aberto no terminal. Copie e cole o pedido.",
   "Copy and paste the request into {agent}.": "Copie e cole o pedido no {agent}.",
-  "Configure Omarchy with your agent and save changes to your repository. Sync them to your other Omarchy machines.": "Configure o Omarchy com seu agente e salve as mudanças no seu repositório. Sincronize com suas outras máquinas.",
-  "Describe a change to your Omarchy. Save it here, then sync your other machines.": "Descreva uma mudança no Omarchy. Salve no seu repositório e sincronize com suas outras máquinas.",
-  "Extras": "Extras",
+  "Configure your system and apps, including third-party apps, with your agent. Save changes to your repository and sync your Omarchy machines.": "Configure o sistema e os aplicativos, inclusive de terceiros, com seu agente. Salve no repositório e sincronize suas máquinas com Omarchy.",
+  "Describe a change to your system or apps. Save it to your repository and sync your other Omarchy machines.": "Descreva uma mudança no sistema ou nos aplicativos. Salve no repositório e sincronize suas outras máquinas com Omarchy.",
   "Review existing customizations": "Revisar personalizações atuais",
   "Review my existing customizations": "Revisar minhas personalizações atuais",
   "Find portable changes already on this machine and choose what to save to your repository.": "Encontre mudanças portáteis nesta máquina e escolha o que salvar no seu repositório."
