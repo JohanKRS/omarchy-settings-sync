@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.9 — 2026-10-21
+
+- Instruct Codex and Claude Code to ask through their native structured question
+  tools so the panel receives clickable options without guessing from prose.
+- Enable Codex's structured question tool in normal execution for new and
+  resumed plugin threads, without changing the user's global configuration.
+- Dismiss Codex question panels when the server resolves or cancels the request,
+  clearing the waiting indicator without sending a duplicate answer.
+- Cover structured question replies, cancellation and thread configuration with
+  protocol and graphical regression tests.
+
 ## 0.1.8 — 2026-10-20
 
 - Make alternatives in explicit conversation choice questions clickable for

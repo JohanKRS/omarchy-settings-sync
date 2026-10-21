@@ -1184,8 +1184,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if method == "session/started":
             self.thread_id = params["id"]
             self.save_settings()
-        elif method == "question/cancelled":
-            panel = self.question_windows.pop(params.get("id"), None)
+        elif method in {"question/cancelled", "serverRequest/resolved"}:
+            identifier = params.get("requestId") if method == "serverRequest/resolved" else params.get("id")
+            panel = self.question_windows.pop(identifier, None)
             if panel:
                 panel.destroy()
             self.update_attention(force=True)

@@ -151,6 +151,9 @@ def make_prompt(task, *, repository, branch="", sync=False, publish=True, create
     return (
         f"Pedido enviado pelo usuário no plugin Omarchy Settings Sync:\n{action}\n\n"
         f"Idioma da interface: {LANGUAGE}. Responda nesse idioma, a menos que o usuário peça outro.\n"
+        "Questions for the user: always use request_user_input (Codex) or "
+        "AskUserQuestion (Claude Code) when available, so the panel receives "
+        "structured questions and clickable options.\n"
         f"Repositório de CONFIGURAÇÕES autorizado: {repository}\n"
         f"Branch: {branch or 'a branch padrão informada pelo remoto'}\n"
         f"{publication}\n\nA cópia instalada do PLUGIN fica em {source}. "
@@ -200,7 +203,7 @@ class CodexClient:
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
         self.request("initialize", {
-            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.1.8"},
+            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.1.9"},
             "capabilities": {"experimentalApi": True},
         })
         self.notify("initialized", {})
@@ -290,7 +293,10 @@ class CodexClient:
                 return output
 
     def start_thread(self, model=None, mode="auto", thread_id=None):
-        args = {"cwd": str(self.workspace), **permission_options(mode)}
+        # Expose the native question tool in normal execution, not only Plan
+        # mode. This override belongs to this thread, not the user's config.
+        args = {"cwd": str(self.workspace), **permission_options(mode),
+                "config": {"features.default_mode_request_user_input": True}}
         if model:
             args["model"] = model
         if thread_id:

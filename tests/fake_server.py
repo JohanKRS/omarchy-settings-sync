@@ -13,6 +13,10 @@ for line in sys.stdin:
     if identifier == "approval-test" and not method:
         send({"method": "turn/completed", "params": {"turn": {"status": "completed"}, "approval": request.get("result")}})
         continue
+    if identifier == 'question-test' and not method:
+        send({'method': 'serverRequest/resolved', 'params': {
+            'threadId': 'thread-test', 'requestId': identifier, 'received': request.get('result')}})
+        continue
     if identifier is None:
         continue
     params = request.get("params", {})
@@ -36,6 +40,13 @@ for line in sys.stdin:
     elif method == "test/disconnect":
         sys.exit(0)
     send({"id": identifier, "result": result})
+    if method == 'test/question':
+        send({'id': 'question-test', 'method': 'item/tool/requestUserInput', 'params': {
+            'threadId': 'thread-test', 'turnId': 'turn-test', 'itemId': 'question-item',
+            'questions': [{'id': 'appearance', 'header': 'Appearance',
+                           'question': 'What does the icon look like?', 'options': [
+                               {'label': 'Browser spinner', 'description': 'The usual loading indicator.'},
+                               {'label': 'Site logo', 'description': 'A custom animation.'}]}]}})
     if method == "turn/start":
         send({"method": "item/agentMessage/delta", "params": {"itemId": "message-test", "delta": "Hello"}})
         send({"id": "approval-test", "method": "item/commandExecution/requestApproval",

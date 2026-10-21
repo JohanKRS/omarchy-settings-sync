@@ -29,6 +29,8 @@ class ConfigurationTest(unittest.TestCase):
         self.assertIn("DESLIGADO", prompt)
         self.assertIn("HEAD", prompt)
         self.assertIn("last-sync.json", prompt)
+        self.assertIn('request_user_input (Codex)', prompt)
+        self.assertIn('AskUserQuestion (Claude Code)', prompt)
         self.assertNotIn("JohanKRS", prompt)
         create = make_prompt("", repository="sample/new", create=True)
         self.assertIn("PRIVADO", create)
@@ -112,6 +114,26 @@ class ProtocolTest(unittest.TestCase):
         completed = self.events.get(timeout=3)
         self.assertEqual(completed["params"]["approval"], {"decision": "decline"})
 
+    def test_structured_questions_enabled_for_new_and_resumed_threads(self):
+        for thread_id in (None, 'previous-thread'):
+            with self.subTest(thread_id=thread_id):
+                result = self.client.start_thread(mode='ask', thread_id=thread_id)
+                self.assertEqual(result['received']['config'], {
+                    'features.default_mode_request_user_input': True})
+                self.assertEqual(result['received']['sandbox'], 'workspace-write')
+                self.assertEqual(result['received']['approvalsReviewer'], 'user')
+
+    def test_structured_question_answer_roundtrip(self):
+        self.client.request('test/question', {})
+        question = self.events.get(timeout=3)
+        self.assertEqual(question['method'], 'item/tool/requestUserInput')
+        answer = {'answers': {'appearance': {'answers': ['Browser spinner']}}}
+        self.client.respond(question['id'], answer)
+        resolved = self.events.get(timeout=3)
+        self.assertEqual(resolved['method'], 'serverRequest/resolved')
+        self.assertEqual(resolved['params']['requestId'], question['id'])
+        self.assertEqual(resolved['params']['received'], answer)
+
     def test_errors_and_disconnect_release_pending_request(self):
         with self.assertRaisesRegex(RpcError, "expected error"):
             self.client.request("test/error", {})
@@ -153,6 +175,8 @@ class ContextTest(unittest.TestCase):
         private_write(self.record_path, self.record)
         prompt = make_prompt("Sync", repository=self.repo, branch="main", sync=True, locations=self.locations)
         self.assertIn("VERIFICAÇÃO RÁPIDA", prompt)
+        self.assertIn('request_user_input (Codex)', prompt)
+        self.assertIn('AskUserQuestion (Claude Code)', prompt)
         self.assertIn("No changes.", prompt)
         self.assertIn("Não examine arquivos locais", prompt)
         self.assertIn("a" * 40, prompt)

@@ -336,6 +336,40 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert not window.outbox.for_agent('codex')
         window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
         assert not window.add_message(tr('You'), choice_text).choice_buttons
+        # Native questions do not depend on selection words in the prose. Use
+        # the reported diagnostic wording, then exercise Codex's resolution event.
+        native_question = {'id': 'native-question', 'method': 'item/tool/requestUserInput', 'params': {
+            'threadId': 'test-thread', 'turnId': 'test-turn', 'itemId': 'diagnostic',
+            'questions': [{'id': 'appearance', 'header': 'Appearance',
+                           'question': 'What does the stuck icon look like in the ChatGPT tab?',
+                           'options': [{'label': text, 'description': ''} for text in (
+                               'Firefox’s usual page-loading spinner',
+                               'A special ChatGPT animation or changing logo', 'I’m not sure')]}]}}
+        window.event(native_question)
+        panel = window.question_windows['native-question']
+        options = [w for w in widgets(panel) if isinstance(w, Gtk.CheckButton)]
+        assert len(options) == 3 and all(w.get_sensitive() for w in options)
+        assert window.attention_waiting
+        options[0].set_active(True)
+        before = backend.respond.call_count
+        next(w for w in widgets(panel) if isinstance(w, Gtk.Button) and w.get_label() == tr('Reply')).emit('clicked')
+        backend.respond.assert_called_with('native-question', {
+            'answers': {'appearance': {'answers': ['Firefox’s usual page-loading spinner']}}}, None)
+        assert backend.respond.call_count == before + 1
+        resolved = {'method': 'serverRequest/resolved', 'params': {
+            'threadId': 'test-thread', 'requestId': 'native-question'}}
+        window.event(resolved)
+        assert not window.question_windows and not window.attention_waiting
+        # Cancellation before an answer also closes the panel; repeated events
+        # cannot send an answer on the user's behalf or clear another thread.
+        window.event(native_question)
+        window.event({'method': 'serverRequest/resolved', 'params': {
+            'threadId': 'another-thread', 'requestId': 'native-question'}})
+        assert window.question_windows
+        window.event(resolved)
+        window.event(resolved)
+        assert not window.question_windows and not window.attention_waiting
+        assert backend.respond.call_count == before + 1
         # A rejected/unknown steering delivery must not mark the active turn idle.
         assert window.submit('Keep working after a failed steer')
         wait(lambda: not window.delivery_pending)

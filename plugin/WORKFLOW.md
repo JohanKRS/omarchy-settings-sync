@@ -8,6 +8,21 @@ agent, model, authentication, tools, skills, plugins and connections. Reply in
 the user's language. The request identifies the authorized CONFIGURATION
 repository, which is separate from this plugin's source code.
 
+## Questions in the panel
+
+Whenever you need an answer from the user, use the agent's native structured
+question tool: `request_user_input` in Codex or `AskUserQuestion` in Claude Code.
+The panel renders the question and its options as clickable controls and sends
+the user's answer back through that tool. Do not replace an available question
+tool with a question and a Markdown list in the conversation.
+
+Write questions and short, distinct option labels in the user's language. Use
+the tool's free-text answer support when the suggested options do not fit. Ask
+only for information or decisions needed for the task; do not introduce extra
+confirmation steps. Keep command and file permissions in the agent's normal
+approval flow. If the native question tool is unavailable, ask clearly in the
+conversation instead of pretending that a structured prompt was displayed.
+
 ## Choose the path before acting
 
 The request includes local context: previous use, last attempt, resumed

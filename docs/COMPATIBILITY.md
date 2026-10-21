@@ -75,6 +75,21 @@ accounts have not been exercised in this environment.
 
 ## Follow-up support
 
+The 0.1.9 update directs Codex and Claude Code to their native structured question
+tools in the shared workflow and in every request, including the short sync
+path. Codex thread start/resume sets `features.default_mode_request_user_input`
+for that thread; it does not write global configuration. This feature is under
+development in the tested Codex CLI 0.163.0. The installed server accepted the
+override on an ephemeral thread, and its prompt renderer confirmed availability
+in Default mode, without making an inference request.
+
+The 45 portable tests and Portuguese graphical test cover thread configuration,
+native replies, diagnostic questions without selection keywords, and Codex
+`serverRequest/resolved` cleanup, including repeated and unrelated-thread events.
+Claude's structured question, free-text and multiple-choice fixtures also pass.
+These checks validate the integration; the model still chooses when to call the
+tool. Prose-only alternatives keep the existing conservative fallback parser.
+
 The 0.1.8 update adds clickable alternatives to explicit choice questions in
 native Codex/Claude conversation messages. Parser tests cover numbered, bulleted
 and lettered alternatives, supported languages, formatting and ordinary lists
