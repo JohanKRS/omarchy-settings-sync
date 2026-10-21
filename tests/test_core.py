@@ -35,6 +35,20 @@ class ConfigurationTest(unittest.TestCase):
         create = make_prompt("", repository="sample/new", create=True)
         self.assertIn("PRIVADO", create)
 
+    def test_existing_customization_review_is_explicit_and_respects_publication(self):
+        ordinary = make_prompt('Change my wallpaper', repository='sample/dotfiles')
+        self.assertNotIn('REVISAR PERSONALIZAÇÕES ATUAIS', ordinary)
+        for publish in (True, False):
+            with self.subTest(publish=publish):
+                prompt = make_prompt('Review', repository='sample/dotfiles',
+                                     review_existing=True, publish=publish)
+                self.assertIn('REVISAR PERSONALIZAÇÕES ATUAIS', prompt)
+                self.assertIn('escolher o que incluir antes de gravar no repositório', prompt)
+                self.assertIn('Não altere as configurações ativas', prompt)
+                self.assertIn('LIGADO' if publish else 'DESLIGADO', prompt)
+                self.assertNotIn('SETUP:', prompt)
+                self.assertNotIn('SINCRONIZAR AGORA', prompt)
+
     def test_all_adapters_launch_interactively_without_a_prompt_channel_in_argv(self):
         expected = {
             'codex': ['codex', '--approve-for-me'],

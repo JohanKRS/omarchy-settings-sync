@@ -1,18 +1,33 @@
 # Omarchy Settings Sync
 
-**Sync your configuration across different Omarchy installations.**
+**Configure Omarchy with your agent. Take your changes to your other machines.**
 
-Keep your portable preferences in your own Git repository, then use the same
-repository on each Omarchy installation. The plugin adds a **Sync** button to
-the bar panel and asks your locally configured agent to reconcile, apply and
-validate those preferences on the current machine.
+Describe a change in the panel. Your local agent configures this machine and,
+with **Push changes** enabled, saves the reusable settings in your own Git
+repository. On another Omarchy machine, select the same repository and click
+**Sync** to apply them. Your configuration repository stays separate from the
+plugin's source code.
 
-You can also ask the agent to change a setting and publish the reusable part
-back to your configuration repository, ready for the next installation to sync.
-The plugin's source repository and your personal configuration repository are
-separate.
+Already customized your system? **[Settings](docs/settings.png) → Extras → Review existing
+customizations** asks the agent to find portable changes and lets you choose
+what to save.
 
-<p align="center"><img src="preview.png" width="560" alt="Omarchy Settings Sync panel with a compact Sync header, agent selectors and message field"></p>
+<p align="center"><img src="preview.png" width="560" alt="Agent working on a terminal font request to save and sync across Omarchy machines"></p>
+
+<details>
+<summary>More screenshots</summary>
+
+Examples use synthetic data.
+
+| Conversation and queue | Clickable answers |
+| --- | --- |
+| [![Conversation and queued follow-ups](docs/conversation.png)](docs/conversation.png) | [![Clickable conversation alternatives](docs/choices.png)](docs/choices.png) |
+
+| Structured questions | Settings and extras |
+| --- | --- |
+| [![Native question with options and free text](docs/questions.png)](docs/questions.png) | [![Settings with optional customization review](docs/settings.png)](docs/settings.png) |
+
+</details>
 
 ## Sync between installations
 
@@ -87,6 +102,7 @@ URL. An empty branch uses the repository's default branch. See the
 | Stop icon, beside Send/Queue while working | Interrupt a native conversation, or send Ctrl+C to an embedded CLI |
 | Terminal icon | Open a companion shell in the workspace, including during a task |
 | Settings | Configure the repository and permissions; inspect or refresh the installed agent's models |
+| **Settings → Extras → Review existing customizations** | Find portable settings already on this machine and choose what to save to the configured repository |
 | **Continue conversation in terminal** | Resume an idle Codex/Claude conversation in its CLI |
 | New chat | Archive the current local conversation and start a fresh one |
 | Down arrow in the conversation | Shown while reading older messages; jump to the latest message and resume following replies |
@@ -94,7 +110,9 @@ URL. An empty branch uses the repository's default branch. See the
 Escape closes the topmost question, settings panel or selector first. When an
 embedded terminal has focus, Escape goes to the CLI for its own controls.
 Otherwise, Escape or a click outside hides the panel. Hiding an active task does not stop it.
-Questions support options and free text; Claude also supports multiple selections.
+The default prompt asks Codex and Claude to use native structured questions,
+with clickable options and free text; Claude also supports multiple selections.
+Codex's question tool is enabled in normal execution for plugin threads.
 In the native conversation, explicit choice questions with numbered, bulleted
 or A)/B) alternatives become clickable after the message finishes streaming.
 The latest agent message can be answered once this way: the question and full

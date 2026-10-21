@@ -16,10 +16,10 @@ _No response_
 
 ### Maintainer notes
 
-Omarchy Settings Sync synchronizes configuration across different Omarchy installations
-using the user's own Git repository and locally authenticated agent. Each
-installation applies portable preferences on demand while preserving local
-hardware-specific settings. The plugin repository contains no personal dotfiles.
+Omarchy Settings Sync lets users configure Omarchy with their local agent, save
+reusable changes to their own Git repository, and sync them to their other
+machines. An optional review helps adopt existing customizations. Each sync
+preserves machine-specific settings. The plugin contains no personal dotfiles.
 
 The QML bar widget runs in the existing Omarchy shell and starts a GTK4 Layer Shell
 panel on demand. Codex and Claude have native conversations and question handling;

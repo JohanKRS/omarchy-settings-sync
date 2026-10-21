@@ -99,7 +99,7 @@ def repository_url(value):
     return value.rstrip("/")
 
 
-def make_prompt(task, *, repository, branch="", sync=False, publish=True, create=False,
+def make_prompt(task, *, repository, branch="", sync=False, publish=True, create=False, review_existing=False,
                 source=ROOT, thread_id=None, locations=None):
     repository = repository_url(repository)
     locations = locations or paths()
@@ -122,6 +122,21 @@ def make_prompt(task, *, repository, branch="", sync=False, publish=True, create
             "SYNC.md, .gitignore e arquivos de configuração reutilizáveis. "
             "Não publique segredos, logins nem uma cópia indiscriminada de ~/.config. "
             "Valide, publique a configuração inicial e confirme a URL exata."
+        )
+    if review_existing:
+        action = (
+            "REVISAR PERSONALIZAÇÕES ATUAIS. Examine as configurações relevantes deste "
+            "Omarchy e compare com os padrões instalados e o repositório configurado. "
+            "Identifique alterações portáteis que ainda não estão documentadas no repositório. "
+            "Não é possível reconstruir com certeza o histórico de alterações: indique "
+            "incertezas e não trate toda diferença como uma personalização intencional. "
+            "Não altere as configurações ativas nem copie perfis completos, segredos, "
+            "históricos ou identificadores de hardware. Primeiro mostre um resumo curto "
+            "do que pode ser reaproveitado e use a ferramenta de perguntas estruturadas "
+            "para o usuário escolher o que incluir antes de gravar no repositório. "
+            "Depois da escolha, prepare somente os itens selecionados, documente destinos "
+            "e adaptações, valide e publique apenas se a publicação estiver habilitada. "
+            "Se nada novo for encontrado, informe isso sem criar alterações."
         )
     publication = (
         "Salvar no repositório está LIGADO. Você está autorizado a publicar na branch configurada "

@@ -18,6 +18,14 @@ from core import private_write
 MODELS = [{'model': '', 'displayName': 'Default', 'supportedReasoningEfforts': []}]
 
 
+def widgets(widget):
+    yield widget
+    child = widget.get_first_child()
+    while child:
+        yield from widgets(child)
+        child = child.get_next_sibling()
+
+
 def settle():
     until = time.monotonic() + .3
     while time.monotonic() < until:
@@ -43,7 +51,26 @@ with tempfile.TemporaryDirectory(prefix='omarchy-settings-preview-') as temp:
         settle()
         x, y, width, height = map(int, window.popup_bounds)
         region = f'{x},{y} {width}x{height}'
+        window.add_message('You', 'Set my terminal font to JetBrains Mono and save it for my other Omarchy machines.')
+        window.add_message('Agent', 'I’ll update the terminal font on this machine, save the portable setting in your repository and document how to apply it with **Sync** on the others.')
+        window.busy = True
+        window.turn_id = 'preview-turn'
+        window.status.set_text('Checking terminal settings…')
+        window.update_buttons()
+        settle()
         subprocess.run(['grim', '-g', region, str(ROOT / 'preview.png')], check=True)
+        window.busy = False
+        window.turn_id = None
+        window.new_chat()
+        settle()
+        window.setup()
+        settle()
+        extras = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Expander))
+        extras.set_expanded(True)
+        settle()
+        assert extras.get_child().get_mapped(), 'Settings extra must be visible in the preview'
+        subprocess.run(['grim', '-g', region, str(ROOT / 'docs/settings.png')], check=True)
+        window.setup_panel.on_close()
         window.client = Mock()
         window.busy = True
         window.request_from_agent({'id': 'preview', 'method': 'item/tool/requestUserInput', 'params': {
@@ -117,4 +144,4 @@ xdg-user-dir DESKTOP
         GLib.source_remove(window.theme_timer)
         GLib.source_remove(window.attention_timer)
         window.destroy()
-        print('Captured preview.png, docs/questions.png, docs/conversation.png and docs/choices.png; spinner animates after reopening')
+        print('Captured preview.png, docs/settings.png, docs/questions.png, docs/conversation.png and docs/choices.png; spinner animates after reopening')

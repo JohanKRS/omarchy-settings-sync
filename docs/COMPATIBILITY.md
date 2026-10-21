@@ -83,12 +83,15 @@ development in the tested Codex CLI 0.163.0. The installed server accepted the
 override on an ephemeral thread, and its prompt renderer confirmed availability
 in Default mode, without making an inference request.
 
-The 45 portable tests and Portuguese graphical test cover thread configuration,
+The 46 portable tests and Portuguese graphical test cover thread configuration,
 native replies, diagnostic questions without selection keywords, and Codex
 `serverRequest/resolved` cleanup, including repeated and unrelated-thread events.
 Claude's structured question, free-text and multiple-choice fixtures also pass.
 These checks validate the integration; the model still chooses when to call the
 tool. Prose-only alternatives keep the existing conservative fallback parser.
+The optional existing-customization review is an explicit Settings action. Its
+fixtures cover repository validation, no automatic scan on opening, publication
+preferences, and disabling the action during active work.
 
 The 0.1.8 update adds clickable alternatives to explicit choice questions in
 native Codex/Claude conversation messages. Parser tests cover numbered, bulleted

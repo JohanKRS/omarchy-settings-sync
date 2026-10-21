@@ -71,6 +71,26 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert window.settings["repository"] == "https://github.com/sample/dotfiles"
         assert not window.panels
         assert window.send_button.get_sensitive(), "First request can start Codex on demand"
+        # The optional review lives in Settings, never runs merely on opening,
+        # and uses the repository entered in the form.
+        with patch.object(window, 'submit', return_value=True) as submit_review:
+            window.setup()
+            extras = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Expander))
+            assert not extras.get_expanded()
+            submit_review.assert_not_called()
+            review = extras.get_child()
+            assert review.get_label() == tr('Review existing customizations') and review.get_sensitive()
+            entries = [w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Entry)]
+            entries[0].set_text('invalid')
+            extras.set_expanded(True)
+            wait(lambda: review.get_mapped() and review.get_height() > 0)
+            review.emit('clicked')
+            submit_review.assert_not_called()
+            assert window.setup_panel in window.panels
+            entries[0].set_text('sample/dotfiles')
+            review.emit('clicked')
+            submit_review.assert_called_once_with(tr('Review my existing customizations'), review_existing=True)
+            assert not window.panels
         window.ready = True
         window.update_models([{"model": "sample-model", "displayName": "Sample model",
                                "supportedReasoningEfforts": [{"reasoningEffort": "low"}, {"reasoningEffort": "high"}]}])
@@ -455,6 +475,8 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
                 terminal.assert_called_once_with([os.environ.get("SHELL", "/bin/bash")])
             window.setup()
             assert all(not w.get_sensitive() for w in widgets(window.setup_panel) if isinstance(w, Gtk.Entry))
+            review = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Expander)).get_child()
+            assert not review.get_sensitive()
             window.setup_panel.on_close()
             with patch.object(application, "quit") as quit_app:
                 window.dismiss()

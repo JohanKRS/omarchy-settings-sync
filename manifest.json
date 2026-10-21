@@ -5,12 +5,12 @@
   "version": "0.1.9",
   "author": "JohanKRS",
   "license": "MIT",
-  "description": "Sync configuration across Omarchy installations using your own repository and local agent.",
+  "description": "Configure Omarchy with your agent, save changes to your repository, and sync them to your other machines.",
   "kinds": ["bar-widget"],
   "entryPoints": {"barWidget": "plugin/BarWidget.qml"},
   "barWidget": {
     "displayName": "Omarchy Settings Sync",
-    "description": "Sync configuration between Omarchy installations",
+    "description": "Configure Omarchy with your agent and sync your changes across machines",
     "category": "System",
     "defaultSection": "right",
     "allowMultiple": false

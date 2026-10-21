@@ -2,6 +2,12 @@
 
 ## 0.1.9 — 2026-10-21
 
+- Explain the configure, save and sync workflow in the panel and documentation.
+  Add **Settings → Extras → Review existing customizations** to ask the agent
+  to find portable settings already on the machine and let the user choose
+  which to save. Opening Settings never starts a scan.
+- Show an agent at work in the marketplace preview and add a screenshot gallery
+  to the README, including Settings and its optional customization review.
 - Instruct Codex and Claude Code to ask through their native structured question
   tools so the panel receives clickable options without guessing from prose.
 - Enable Codex's structured question tool in normal execution for new and

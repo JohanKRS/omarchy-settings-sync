@@ -62,8 +62,9 @@ Generate screenshots with synthetic data in a running Omarchy session:
 AGENT_SETTINGS_LANGUAGE=en python3 tools/capture_preview.py
 ```
 
-This captures only the test panel into `preview.png`, `docs/questions.png` and
-`docs/conversation.png`, and checks activity animation after reopening.
+This captures only the test panel into `preview.png`, `docs/settings.png`,
+`docs/questions.png`, `docs/choices.png` and `docs/conversation.png`, and checks
+activity animation after reopening.
 Inspect all images before committing. Do not include
 private repositories, usernames from filesystem paths, tokens or conversations.
 

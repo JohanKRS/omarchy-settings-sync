@@ -581,7 +581,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         else:
             self.empty_title.set_text(AGENTS[self.agent()])
             self.empty_description.set_text(
-                tr('Write a request below to begin.') if self.executables[self.agent()]
+                tr('Describe a change to your Omarchy. Save it here, then sync your other machines.') if self.executables[self.agent()]
                 else tr('Install {agent} from the Omarchy agent menu.', agent=AGENTS[self.agent()]))
             self.content.set_visible_child_name("empty")
 
@@ -1073,7 +1073,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return
         self.submit(tr('Sync'), sync=True)
 
-    def submit(self, text, sync=False, create=False, *, queued_entry=None, publish=None):
+    def submit(self, text, sync=False, create=False, *, queued_entry=None, publish=None, review_existing=False):
         if self.busy or self.terminal_pid or self.delivery_pending:
             self.status.set_text(tr('Stop the current task first.'))
             return False
@@ -1088,6 +1088,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             prompt = make_prompt(
                 text, repository=self.settings["repository"], branch=self.settings.get("branch", ""),
                 sync=sync, publish=(self.publish.get_active() if publish is None else publish) or create, create=create,
+                review_existing=review_existing,
                 thread_id=self.thread_id if self.agent() in NATIVE_AGENTS else None,
                 locations=self.locations,
             )
@@ -1587,6 +1588,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.model_info.get_parent():
             self.model_info.get_parent().remove(self.model_info)
         content.append(self.model_info)
+        about = label(tr('Configure Omarchy with your agent and save changes to your repository. Sync them to your other Omarchy machines.'), 'muted')
+        about.set_max_width_chars(48)
+        content.append(about)
         repository = Gtk.Entry(placeholder_text=tr('owner/dotfiles'))
         repository.set_text(self.settings.get("repository", ""))
         content.append(self.control(tr('Repository for saving your settings'), repository))
@@ -1607,7 +1611,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         content.append(error_label)
         buttons = box(False, 10)
         buttons.set_homogeneous(True)
-        def save(create=False):
+        def save(create=False, review_existing=False):
             try:
                 value = repository_url(repository.get_text())
                 branch_value = branch.get_text().strip()
@@ -1628,6 +1632,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
             dialog.destroy()
             if create:
                 self.submit(tr('Create my configuration repository'), create=True)
+            elif review_existing:
+                self.submit(tr('Review my existing customizations'), review_existing=True)
         existing = Gtk.Button(label=tr('Use repository'))
         existing.set_hexpand(True)
         existing.add_css_class("suggested-action")
@@ -1638,6 +1644,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
         buttons.append(existing)
         buttons.append(create)
         content.append(buttons)
+        extras = Gtk.Expander(label=tr('Extras'))
+        review = Gtk.Button(label=tr('Review existing customizations'))
+        review.set_tooltip_text(tr('Find portable changes already on this machine and choose what to save to your repository.'))
+        review.set_sensitive(not locked and bool(self.executables[self.agent()]))
+        review.connect('clicked', lambda *_: save(review_existing=True))
+        extras.set_child(review)
+        content.append(extras)
         resume = Gtk.Button(label=tr('Continue conversation in terminal'))
         resume.set_sensitive(not locked and bool(self.thread_id) and self.agent() in NATIVE_AGENTS)
         resume.connect("clicked", lambda *_: self.resume_in_terminal())
