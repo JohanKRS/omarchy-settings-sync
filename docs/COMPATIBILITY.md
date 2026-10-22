@@ -75,6 +75,10 @@ accounts have not been exercised in this environment.
 
 ## Follow-up support
 
+The 0.1.12 update shows the installed manifest version in a small Settings
+footer. Visual inspection confirms its bottom-right placement. The 51 portable
+tests, Portuguese graphical smoke test and launcher test pass.
+
 The 0.1.11 update names new native conversations through Codex's
 `thread/name/set` and Claude Code's `rename_session` control request. Isolated
 startup probes confirmed that Codex 0.163.0 and Claude Code 2.1.306 accept these

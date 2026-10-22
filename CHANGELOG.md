@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.12 — 2026-10-22
+
+- Show the installed plugin version in small, muted text at the bottom-right
+  of Settings, read directly from the installed manifest.
+
 ## 0.1.11 — 2026-10-22
 
 - Automatically name new native Codex and Claude Code conversations

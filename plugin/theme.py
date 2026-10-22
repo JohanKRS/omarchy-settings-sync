@@ -86,6 +86,7 @@ class Theme:
             dropdown > button {{ padding: 5px 10px; min-height: 24px; }}
             .empty-title {{ font-weight: 600; font-size: {title}px; }}
             .status {{ font-size: {max(1, size - 1)}px; }}
+            .settings-version {{ font-size: {max(9, round(size * .75))}px; }}
             button:hover, dropdown > button:hover {{ background: alpha({fg}, {alpha("hover-cursor-fill-alpha", .08)}); }}
             dropdown popover > contents {{ border: 1px solid alpha({fg}, .4);
                 border-radius: {radius}px; box-shadow: none; }}

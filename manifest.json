@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "community.agent-settings",
   "name": "Omarchy Settings Sync",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "author": "JohanKRS",
   "license": "MIT",
   "description": "Configure your system and apps, including third-party apps, with your agent. Save changes to your repository and sync across Omarchy machines.",

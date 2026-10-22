@@ -1680,6 +1680,12 @@ class SettingsWindow(Gtk.ApplicationWindow):
         resume.set_sensitive(not locked and bool(self.thread_id) and self.agent() in NATIVE_AGENTS)
         resume.connect("clicked", lambda *_: self.resume_in_terminal())
         content.append(resume)
+        version = read_json(ROOT / 'manifest.json', {}).get('version')
+        if version:
+            footer = label('v' + version, 'muted', selectable=True)
+            footer.add_css_class('settings-version')
+            footer.set_halign(Gtk.Align.END)
+            dialog.append(footer)
         if locked:
             for widget in (repository, branch, mode, existing, create):
                 widget.set_sensitive(False)
