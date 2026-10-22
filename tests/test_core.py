@@ -137,6 +137,12 @@ class ProtocolTest(unittest.TestCase):
                 self.assertEqual(result['received']['sandbox'], 'workspace-write')
                 self.assertEqual(result['received']['approvalsReviewer'], 'user')
 
+    def test_conversation_name_uses_native_metadata(self):
+        result = self.client.set_thread_name('thread-test', 'Settings Sync · Fonte do terminal')
+        self.assertEqual(result['received'], {
+            'threadId': 'thread-test', 'name': 'Settings Sync · Fonte do terminal'})
+        self.assertTrue(self.events.empty(), 'Naming must not start a model turn')
+
     def test_structured_question_answer_roundtrip(self):
         self.client.request('test/question', {})
         question = self.events.get(timeout=3)

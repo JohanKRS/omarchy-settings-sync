@@ -83,6 +83,11 @@ class ClaudeClient(CodexClient):
     def start_thread(self, model=None, mode="auto", thread_id=None):
         return {"thread": {"id": self.session_id}}
 
+    def set_thread_name(self, thread_id, name):
+        if thread_id != self.session_id:
+            raise RpcError('Cannot rename a different Claude session')
+        return self.request('rename_session', {'title': name, 'source': 'host'}, timeout=5)
+
     def turn(self, thread_id, text, model=None, effort=None):
         self.turn_id = str(uuid.uuid4())
         self.interrupted = self.had_text = False

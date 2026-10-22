@@ -25,6 +25,7 @@ Vte = None  # Load the terminal library only when an external agent needs it.
 from i18n import tr
 from theme import Theme
 from context import begin_task, finish_task
+from conversation_names import archive_filename, conversation_name
 from catalog import MODEL_AGENTS, DISCOVERY_AGENTS, agent_executable, discover_models
 from claude_client import ClaudeClient, PERMISSION_MODES as CLAUDE_PERMISSION_MODES
 from outbox import Outbox
@@ -37,7 +38,7 @@ DIRECTION_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
     str(Path(__file__).with_name('icons') / 'direction-upload-symbolic.svg')))
 
 from core import (
-    AGENTS, ROOT, CodexClient, cached_models, codex_defaults, default_agent, external_command,
+    AGENTS, ROOT, CodexClient, RpcError, cached_models, codex_defaults, default_agent, external_command,
     make_prompt, paths, private_write, read_json, repository_url, terminal,
 )
 
@@ -980,6 +981,16 @@ class SettingsWindow(Gtk.ApplicationWindow):
     def save_conversation(self):
         private_write(self.session_file, self.messages[-150:])
 
+    def remember_conversation_name(self, agent, thread_id, name, named):
+        if self.agent() != agent or self.thread_id != thread_id:
+            return
+        self.settings.setdefault('conversation_names', {})[agent] = {
+            'thread_id': thread_id, 'name': name,
+        }
+        self.save_settings()
+        if not named:
+            self.add_message(tr('Agent'), tr('Could not set the conversation name in the agent history. Your request will continue.'))
+
     def scroll_down(self):
         self.scroll.to_end()
 
@@ -1131,6 +1142,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.client = CodexClient(receive)
         client = self.client
         agent, repository, branch = self.agent(), self.settings['repository'], self.settings.get('branch', '')
+        name = conversation_name(text, sync=sync, create=create, review_existing=review_existing)
         def execute():
             # A quick reopen may overlap shutdown of the previous CLI. Wait in
             # the worker, never in the UI, before resuming the same conversation.
@@ -1153,6 +1165,15 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.thread_loaded = True
                 ui(self.outbox.bind_thread, agent, repository, branch, previous_thread, self.thread_id)
                 ui(self.save_settings)
+                if not previous_thread:
+                    # Name only new sessions, once. Resuming must preserve a
+                    # name edited by the user in the agent's own history.
+                    named = True
+                    try:
+                        client.set_thread_name(self.thread_id, name)
+                    except (RpcError, OSError):
+                        named = False  # Older CLIs may not support renaming.
+                    ui(self.remember_conversation_name, agent, self.thread_id, name, named)
             return self.client.turn(self.thread_id, prompt, model, effort)
         self.worker(execute, lambda r: self.started(r["turn"]["id"], queued_entry) if client is self.client else None)
         return True
@@ -1555,10 +1576,16 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return
         self.queue_paused = False
         self.close_client()
+        if self.messages:
+            record = self.settings.get('conversation_names', {}).get(self.agent(), {})
+            name = record.get('name') if record.get('thread_id') == self.thread_id else None
+            if not name:
+                text = next((m['text'] for m in self.messages if m['role'] in {'You', 'Você', 'Tú'}), '')
+                name = conversation_name(text)
+            private_write(self.locations['state'] / 'history' / archive_filename(name, self.agent()), self.messages)
+        self.settings.get('conversation_names', {}).pop(self.agent(), None)
         self.thread_id = None
         self.thread_loaded = False
-        if self.messages:
-            private_write(self.locations["state"] / "history" / (time.strftime("%Y%m%d-%H%M%S") + ".json"), self.messages)
         self.messages = []
         if self.reply_body:
             self.reply_body.set_choices_enabled(False)

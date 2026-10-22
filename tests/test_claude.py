@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugin"))
 from claude_client import ClaudeClient
+from core import RpcError
 
 
 class ClaudeTest(unittest.TestCase):
@@ -43,6 +44,15 @@ class ClaudeTest(unittest.TestCase):
         self.assertEqual(result["behavior"], "allow")
         self.assertEqual(result["updatedInput"]["answers"], {"Which color?": "Blue", "Which extras?": "One, Two"})
         self.assertEqual(self.until("turn/completed")["params"]["turn"]["status"], "completed")
+
+    def test_conversation_name_uses_native_control_and_rejects_other_sessions(self):
+        title = 'Settings Sync · Fonte do terminal'
+        result = self.client.set_thread_name(self.client.session_id, title)
+        self.assertEqual(result['received'], {'subtype': 'rename_session', 'title': title, 'source': 'host'})
+        with self.assertRaises(RpcError), patch.object(self.client, 'send') as send:
+            self.client.set_thread_name('another-session', title)
+        send.assert_not_called()
+        self.assertTrue(self.events.empty(), 'Naming must not start a model turn')
 
     def test_decline_does_not_authorize_the_tool(self):
         question = self.ask()

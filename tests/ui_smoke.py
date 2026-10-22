@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugin"))
 from app import Application, SettingsWindow, Gtk, Gdk, GLib, LayerShell
-from core import AGENTS, private_write
+from core import AGENTS, RpcError, private_write
 from claude_client import ClaudeClient
 
 CLAUDE_MODELS = [
@@ -213,6 +213,9 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             assert window.submit("Test lazy startup")
         wait(lambda: window.turn_id == "test-turn")
         backend.start.assert_called_once()
+        backend.set_thread_name.assert_called_once_with('test-thread', 'Settings Sync · Test lazy startup')
+        assert json.loads(window.settings_file.read_text())['conversation_names']['codex'] == {
+            'thread_id': 'test-thread', 'name': 'Settings Sync · Test lazy startup'}
         assert backend.turn.call_args.args[2:] == ("sample-model", "high")
         settle()
         first_indicator = window.spinner.indicator
@@ -254,6 +257,7 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert window.busy and backend.turn.call_count == 2
         assert not window.outbox.for_agent('codex')
         assert 'Run after the current response' in backend.turn.call_args.args[1]
+        assert backend.set_thread_name.call_count == 1, 'Follow-ups must preserve the history name'
         direction = window.queue_message('Promote this queued message')
         next(w for w in widgets(window.queue_list) if isinstance(w, Gtk.Button) and
              w.get_tooltip_text() == tr('Direct now')).emit('clicked')
@@ -613,6 +617,30 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
                 wait(lambda: window.terminal_pid is None)
                 assert window.send_button.get_sensitive()
         window.client = None
+        window.agent_select.set_selected(window.agent_ids.index('codex'))
+        saved_messages = list(window.messages)
+        window.new_chat()
+        history = list((window.locations['state'] / 'history').glob('*-codex-Test-lazy-startup-*.json'))
+        assert len(history) == 1 and json.loads(history[0].read_text()) == saved_messages
+        assert 'codex' not in window.settings['conversation_names']
+        # A CLI without naming support must still receive the task, and the
+        # local archive retains a useful name. Resuming never overwrites names.
+        backend.start.side_effect = None
+        backend.set_thread_name.side_effect = RpcError('Naming unavailable')
+        assert window.submit('Ajustar áudio')
+        wait(lambda: not window.delivery_pending)
+        assert window.busy and 'Ajustar áudio' in backend.turn.call_args.args[1]
+        assert any(m['text'] == tr('Could not set the conversation name in the agent history. Your request will continue.')
+                   for m in window.messages)
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        names_before = backend.set_thread_name.call_count
+        window.thread_loaded = False
+        assert window.submit('Continue the same conversation')
+        wait(lambda: not window.delivery_pending)
+        assert backend.set_thread_name.call_count == names_before
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        backend.set_thread_name.side_effect = None
+        window.close_client()
         with patch.object(window, "quit_if_idle") as cleanup:
             window.popup_key(None, Gdk.KEY_Escape, 0, 0)
             assert not window.get_visible()

@@ -214,9 +214,16 @@ The display name and repository are now **Omarchy Settings Sync**. The permanent
 plugin ID (`community.agent-settings`) and existing data paths are retained, so
 renaming does not reset your settings or conversations.
 
+New native Codex and Claude Code conversations appear in the agent's history as
+**Settings Sync · <your first request>**. Names are shortened locally, without
+an extra model call, and stay unchanged on follow-ups or resume. Search for
+**Settings Sync** or the topic in your agent's history. Existing conversations
+keep their names. Local archives also include the topic and agent in their
+filenames. Other CLIs keep their own naming behavior.
+
 | Default location | Contents |
 | --- | --- |
-| `~/.config/omarchy-agent-settings/settings.json` | Repository, branch, selections and conversation IDs |
+| `~/.config/omarchy-agent-settings/settings.json` | Repository, branch, selections, conversation IDs and names |
 | `~/.local/state/omarchy-agent-settings/` | Conversations, activity records, logs, model cache and backups |
 | `~/.local/state/omarchy-agent-settings/outbox.json` | Unsent follow-ups, including messages with unconfirmed delivery |
 | `~/.local/share/omarchy-agent-settings/workspace/` | Working copies of configuration repositories |

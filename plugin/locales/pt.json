@@ -138,5 +138,9 @@
   "Describe a change to your system or apps. Save it to your repository and sync your other Omarchy machines.": "Descreva uma mudança no sistema ou nos aplicativos. Salve no repositório e sincronize suas outras máquinas com Omarchy.",
   "Review existing customizations": "Revisar personalizações atuais",
   "Review my existing customizations": "Revisar minhas personalizações atuais",
-  "Find portable changes already on this machine and choose what to save to your repository.": "Encontre mudanças portáteis nesta máquina e escolha o que salvar no seu repositório."
+  "Find portable changes already on this machine and choose what to save to your repository.": "Encontre mudanças portáteis nesta máquina e escolha o que salvar no seu repositório.",
+  "Create configuration repository": "Criar repositório de configurações",
+  "Sync settings": "Sincronizar configurações",
+  "Configuration": "Configuração",
+  "Could not set the conversation name in the agent history. Your request will continue.": "Não foi possível nomear a conversa no histórico do agente. Seu pedido continuará."
 }

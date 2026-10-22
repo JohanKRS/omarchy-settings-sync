@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.11 — 2026-10-22
+
+- Automatically name new native Codex and Claude Code conversations
+  **Settings Sync · <request>** in the agent's history. Use the original request
+  or a short action name, without a model call or the plugin's full instructions.
+- Keep names unchanged on follow-ups and resume, preserving user renames.
+  If an older CLI cannot set the name, show a short notice and continue the task.
+- Include the topic and agent in local conversation archive filenames, with
+  unique suffixes to preserve multiple conversations archived within a second.
+
 ## 0.1.10 — 2026-10-21
 
 - Clarify that configuration and sync cover the system, Omarchy apps and

@@ -27,6 +27,8 @@ for line in sys.stdin:
                   "nextCursor": None if cursor else "page-2"}
     elif method in ("thread/start", "thread/resume"):
         result = {"thread": {"id": params.get("threadId", "thread-test")}, "received": params}
+    elif method == 'thread/name/set':
+        result = {'received': params}
     elif method == "turn/start":
         result = {"turn": {"id": "turn-test"}, "received": params}
     elif method == "turn/steer":

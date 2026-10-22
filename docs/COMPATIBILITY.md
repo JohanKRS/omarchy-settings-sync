@@ -75,6 +75,14 @@ accounts have not been exercised in this environment.
 
 ## Follow-up support
 
+The 0.1.11 update names new native conversations through Codex's
+`thread/name/set` and Claude Code's `rename_session` control request. Isolated
+startup probes confirmed that Codex 0.163.0 and Claude Code 2.1.306 accept these
+requests without a model turn. The 51 portable tests and Portuguese graphical
+smoke test cover literal Unicode titles, action names, safe unique archive
+filenames, naming only once, resume preservation and continuing after a naming
+failure. Existing native conversations are not renamed retroactively.
+
 The 0.1.10 update makes the existing-customization review visible directly in
 Settings and clarifies that system, bundled-app and third-party app settings
 can be synchronized. All 46 portable tests, the Portuguese graphical test and

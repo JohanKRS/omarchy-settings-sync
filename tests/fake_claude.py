@@ -15,6 +15,8 @@ for line in sys.stdin:
         if request["subtype"] == "initialize":
             result = {"models": [{"value": "opus", "displayName": "Opus",
                                    "supportedEffortLevels": ["low", "high"]}]}
+        elif request['subtype'] == 'rename_session':
+            result = {'received': request}
         send({"type": "control_response", "response": {"subtype": "success",
               "request_id": message["request_id"], "response": result}})
         if request["subtype"] == "interrupt":
