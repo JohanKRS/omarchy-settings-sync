@@ -53,6 +53,12 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         # or letting concurrent mouse/keyboard activity dismiss the fixture.
         LayerShell.set_keyboard_mode(window, LayerShell.KeyboardMode.NONE)
         window.set_can_target(False)
+        # GTK can still dispatch a root capture gesture with can_target=False.
+        # Exercise dismissal handlers below without real desktop input racing
+        # this fixture and closing a mocked client halfway through a test.
+        for controller in list(window.observe_controllers()):
+            if isinstance(controller, (Gtk.GestureClick, Gtk.EventControllerKey)):
+                window.remove_controller(controller)
         window.present()
         assert window.vte is None, "Native conversations must not initialize VTE"
         assert json.loads(window.attention_file.read_text())["opened"]
@@ -112,6 +118,27 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             return result
         settle()
         baseline = geometry()
+        # Real TextView editing must scroll both down and back to the cursor.
+        window.input.grab_focus()
+        window.input.emit('insert-at-cursor', ('A wrapped prompt with many words. ' * 8 + '\n') * 14)
+        settle()
+        input_adjustment = window.input_scroll.get_vadjustment()
+        assert input_adjustment.get_value() > 0, 'Typing must follow the caret below the first page'
+        caret = window.input.get_iter_location(window.input.get_buffer().get_iter_at_mark(
+            window.input.get_buffer().get_insert()))
+        def cursor_visible():
+            caret = window.input.get_iter_location(window.input.get_buffer().get_iter_at_mark(
+                window.input.get_buffer().get_insert()))
+            visible = window.input.get_visible_rect()
+            return visible.y <= caret.y and caret.y + caret.height <= visible.y + visible.height
+        wait(cursor_visible)
+        window.input.get_buffer().place_cursor(window.input.get_buffer().get_start_iter())
+        settle()
+        wait(cursor_visible)
+        wait(lambda: input_adjustment.get_value() <= window.input.get_top_margin())
+        window.input.get_buffer().set_text('')
+        settle()
+        assert geometry() == baseline
         assert not window.queue_area.get_visible(), 'An empty queue should not add controls'
         assert not window.spinner.get_visible(), 'Idle must not leave a static activity ring'
         assert window.popup_bounds[3] <= 740
@@ -286,6 +313,52 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         for entry in queued[1:]:
             window.remove_queued(entry)
         assert not window.queue_area.get_visible()
+        # Clipboard image signals use synthetic textures, never the user's clipboard.
+        texture = Gdk.MemoryTexture.new(320, 180, Gdk.MemoryFormat.R8G8B8A8,
+                                       GLib.Bytes.new(bytes([80, 140, 220, 255]) * (320 * 180)), 320 * 4)
+        clipboard = Mock()
+        clipboard.get_formats.return_value = Gdk.ContentFormats.new_for_gtype(Gdk.Texture)
+        clipboard.read_texture_finish.return_value = texture
+        clipboard.read_texture_async.side_effect = lambda _, callback: GLib.idle_add(callback, clipboard, None)
+        with patch.object(window.input, 'get_clipboard', return_value=clipboard):
+            assert window.composer_key(None, Gdk.KEY_v, 0, Gdk.ModifierType.CONTROL_MASK)
+            assert window.image_pastes == 1 and not window.send_button.get_sensitive()
+            before = backend.turn.call_count
+            window.send()
+            assert backend.turn.call_count == before, 'Never send while the image is still loading'
+            wait(lambda: not window.image_pastes)
+        assert len(window.draft_images) == 1 and window.image_strip.get_visible()
+        image_path = window.draft_images[0]
+        assert Path(image_path).stat().st_mode & 0o777 == 0o600
+        assert any(isinstance(w, Gtk.Image) and w.get_paintable() for w in widgets(window.image_strip))
+        settle()
+        assert 0 < window.image_strip.get_height() <= 48
+        assert round(window.popup_card.compute_bounds(window)[1].get_height()) == baseline[0][3]
+        # An image-only request is durable, editable and sent as an image.
+        window.send(queued=True)
+        pending = window.outbox.for_agent('codex')[0]
+        assert pending['images'] == [image_path] and not pending['text']
+        assert not window.draft_images and not window.image_strip.get_visible()
+        window.edit_queued(pending)
+        assert window.draft_images == [image_path]
+        window.send()
+        wait(lambda: not window.delivery_pending)
+        assert backend.turn.call_args.kwargs['images'] == [image_path]
+        assert window.messages[-1]['images'] == [image_path]
+        assert json.loads(window.session_file.read_text())[-1]['images'] == [image_path]
+        assert not window.draft_images
+        window.draft_images = [image_path]
+        window.update_images()
+        window.send(immediate=True)
+        wait(lambda: not window.delivery_pending)
+        assert backend.steer.call_args.kwargs['images'] == [image_path]
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        # Missing attachments must leave the draft available for correction.
+        window.draft_images = [str(Path(temp) / 'missing.png')]
+        window.send()
+        assert window.draft_images and not window.busy
+        window.remove_image(window.draft_images[0])
+        assert not window.image_strip.get_visible()
         # Markdown remains source-backed while the UI uses native tables,
         # selectable inline markup and links. Raw HTML is never executed.
         markdown = ('## Choices\n\n**Bold** and *italic*, ~~old~~, `x < y`, '
@@ -306,6 +379,24 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert any(w.get_text() == '<script>alert(1)</script>' for w in widgets(body) if isinstance(w, Gtk.Label))
         _, table_bounds = cells[0].get_parent().compute_bounds(window.popup_card)
         assert table_bounds.get_x() + table_bounds.get_width() < window.popup_card.get_width()
+        from message_view import TableView
+        table = next(w for w in widgets(body) if isinstance(w, TableView))
+        def compact_table(view):
+            grid = view.grid
+            bottom = max(w.compute_bounds(view)[1].get_y() + w.compute_bounds(view)[1].get_height()
+                         for w in widgets(grid) if isinstance(w, Gtk.Label))
+            assert abs(view.get_height() - bottom) < 4, ('Blank space below table', view.get_height(), bottom)
+        compact_table(table)
+        # Wrapping and horizontal overflow must both remain inside the panel.
+        wide = window.add_message(tr('Agent'), '| ' + ' | '.join(['Column'] * 12) + ' |\n| ' +
+                                  ' | '.join(['---'] * 12) + ' |\n| ' +
+                                  ' | '.join(['Long cell description'] * 12) + ' |')
+        settle()
+        wide_table = next(w for w in widgets(wide) if isinstance(w, TableView))
+        compact_table(wide_table)
+        horizontal = wide_table.scroll.get_hadjustment()
+        assert horizontal.get_upper() > horizontal.get_page_size()
+        assert round(window.popup_card.compute_bounds(window)[1].get_width()) == baseline[0][2]
         # Streaming must append to raw Markdown rather than already rendered text.
         window.add_message(tr('Agent'), '**Hel', 'markdown-stream')
         window.event({'method': 'item/agentMessage/delta', 'params': {'itemId': 'markdown-stream', 'delta': 'lo**'}})
@@ -532,11 +623,12 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             assert window.settings['permissions'] == 'read'
             old_turn, old_pid = window.turn_id, window.client.process.pid
             window.queue_message('Later follow-up')
-            assert window.steer('New direction in the same conversation')
+            assert window.steer('New direction in the same conversation', images=[image_path])
             wait(lambda: window.turn_id and window.turn_id != old_turn and
                  bool(window.question_windows) and not window.delivery_pending)
             assert window.client.process.pid == old_pid and window.thread_id == session_id
             assert [entry['text'] for entry in window.outbox.for_agent('claude')] == ['Later follow-up']
+            assert next(m for m in reversed(window.messages) if m['role'] == tr('You'))['images'] == [image_path]
             window.stop()
             wait(lambda: not window.busy)
             assert window.queue_paused and len(window.outbox.for_agent('claude')) == 1
@@ -620,8 +712,8 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         window.agent_select.set_selected(window.agent_ids.index('codex'))
         saved_messages = list(window.messages)
         window.new_chat()
-        history = list((window.locations['state'] / 'history').glob('*-codex-Test-lazy-startup-*.json'))
-        assert len(history) == 1 and json.loads(history[0].read_text()) == saved_messages
+        history = [record for record in window.history.entries() if record['name'] == 'Settings Sync · Test lazy startup' and record['agent'] == 'codex']
+        assert len(history) == 1 and history[0]['messages'] == saved_messages
         assert 'codex' not in window.settings['conversation_names']
         # A CLI without naming support must still receive the task, and the
         # local archive retains a useful name. Resuming never overwrites names.
@@ -640,6 +732,69 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert backend.set_thread_name.call_count == names_before
         window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
         backend.set_thread_name.side_effect = None
+        # History switches local drafts, queues, repository and native session
+        # together. Merely opening a conversation never starts a model turn.
+        first_key, first_thread = window.history_id, window.thread_id
+        first_repo = window.settings['repository']
+        window.input.get_buffer().set_text('Keep my unsent draft')
+        window.draft_images = [image_path]
+        window.update_images()
+        waiting = window.queue_message('Waiting in the first conversation', images=[image_path])
+        window.show_history()
+        assert window.history_panel in window.panels
+        search = next(w for w in widgets(window.history_panel) if isinstance(w, Gtk.SearchEntry))
+        search.set_text('no such conversation fixture')
+        wait(lambda: any(isinstance(w, Gtk.Label) and w.get_text() == tr('No conversations found.')
+                         for w in widgets(window.history_panel)))
+        window.history_panel.destroy()
+        window.new_chat()
+        assert not window.input.get_buffer().get_char_count() and not window.draft_images
+        assert waiting in window.outbox.entries and not window.current_queue()
+        window.settings.update(repository='https://github.com/sample/other', branch='different')
+        backend.start_thread.return_value = {'thread': {'id': 'second-thread'}}
+        assert window.submit('A second conversation')
+        wait(lambda: not window.delivery_pending)
+        second_key = window.history_id
+        assert not window.open_conversation(first_key), 'Never switch a running task'
+        assert window.history_id == second_key
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        window.input.get_buffer().set_text('Second conversation draft')
+        before = backend.turn.call_count
+        assert window.open_conversation(first_key)
+        assert backend.turn.call_count == before and not window.thread_loaded
+        assert window.thread_id == first_thread and window.settings['repository'] == first_repo
+        assert window.input.get_buffer().get_text(*window.input.get_buffer().get_bounds(), False) == 'Keep my unsent draft'
+        assert window.draft_images == [image_path] and window.current_queue() == [waiting]
+        assert window.queue_paused, 'Switching conversations must never dispatch queued work'
+        backend.start_thread.return_value = {'thread': {'id': first_thread}}
+        assert window.submit('Resume original session')
+        wait(lambda: not window.delivery_pending)
+        assert backend.start_thread.call_args.args[2] == first_thread
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        assert window.open_conversation(second_key)
+        assert window.thread_id == 'second-thread' and window.settings['branch'] == 'different'
+        assert window.input.get_buffer().get_text(*window.input.get_buffer().get_bounds(), False) == 'Second conversation draft'
+        assert not window.current_queue()
+        # An archive made before session metadata existed still opens, clearly
+        # continues from its transcript and does not guess an old session ID.
+        legacy_key = '20260101-120000-codex-legacy-deadbeef.json'
+        private_write(window.history.directory / legacy_key, [
+            {'role': 'You', 'text': 'Use the blue theme'}, {'role': 'Agent', 'text': 'Blue is configured.'}])
+        assert window.open_conversation(legacy_key)
+        assert window.thread_id is None and window.replay_context
+        assert 'Blue is configured.' in window.messages[-1]['text']
+        assert window.submit('Now change the font')
+        wait(lambda: not window.delivery_pending)
+        assert backend.start_thread.call_args.args[2] is None
+        assert 'Blue is configured.' in backend.turn.call_args.args[1]
+        assert 'Now change the font' in backend.turn.call_args.args[1]
+        assert not window.replay_context
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        window.setup()
+        project_link = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.LinkButton))
+        assert project_link.get_uri() == 'https://github.com/JohanKRS/omarchy-settings-sync'
+        assert any(isinstance(w, Gtk.Label) and w.get_text() == 'v0.1.13' for w in widgets(project_link.get_parent()))
+        window.setup_panel.destroy()
         window.close_client()
         with patch.object(window, "quit_if_idle") as cleanup:
             window.popup_key(None, Gdk.KEY_Escape, 0, 0)

@@ -25,7 +25,10 @@ Vte = None  # Load the terminal library only when an external agent needs it.
 from i18n import tr
 from theme import Theme
 from context import begin_task, finish_task
-from conversation_names import archive_filename, conversation_name
+from conversation_names import conversation_name
+from conversation_history import ConversationHistory, transcript_context
+from datetime import datetime
+from attachments import MAX_IMAGES, save_image, image_bytes, message_text
 from catalog import MODEL_AGENTS, DISCOVERY_AGENTS, agent_executable, discover_models
 from claude_client import ClaudeClient, PERMISSION_MODES as CLAUDE_PERMISSION_MODES
 from outbox import Outbox
@@ -151,6 +154,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.locations = paths()
         self.settings_file = self.locations["config"] / "settings.json"
         self.settings = read_json(self.settings_file, {})
+        self.history = ConversationHistory(self.locations['state'])
+        self.history_ids = self.settings.get('history_ids', {})
+        self.history_id = None
+        self.history_panel = None
+        self.replay_context = []
         self.client = None
         self.client_epoch = 0
         self.closing_clients = []
@@ -164,6 +172,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.turn_id = None
         self.outbox = Outbox(self.locations["state"] / "outbox.json")
         self.queue_paused = bool(self.outbox.entries)
+        self.draft_images = []
+        self.image_pastes = 0
+        self.cursor_scroll_id = None
         self.delivery_pending = False
         self.redirect_entry = None
         self.stopping = False
@@ -245,7 +256,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
         title.set_selectable(False)
         title.set_hexpand(True)
         header.append(title)
-        settings_button = Gtk.Button(icon_name="emblem-system-symbolic", tooltip_text=tr('Settings'))
+        settings_icon = Gtk.Image.new_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(
+            str(Path(__file__).with_name('icons') / 'settings-symbolic.svg'))))
+        settings_button = Gtk.Button(child=settings_icon, tooltip_text=tr('Settings'))
+        settings_button.update_property([Gtk.AccessibleProperty.LABEL], [tr('Settings')])
+        self.history_button = Gtk.Button(icon_name='document-open-recent-symbolic', tooltip_text=tr('Conversation history'))
+        self.history_button.update_property([Gtk.AccessibleProperty.LABEL], [tr('Conversation history')])
+        self.history_button.connect('clicked', lambda *_: self.show_history())
+        header.append(self.history_button)
         settings_button.connect("clicked", lambda *_: self.setup())
         self.new_button = Gtk.Button(icon_name="list-add-symbolic", tooltip_text=tr('New chat'))
         self.new_button.connect("clicked", lambda *_: self.new_chat())
@@ -361,7 +379,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.input.set_left_margin(8)
         input_scroll = Gtk.ScrolledWindow(min_content_height=76, max_content_height=76,
                                          hscrollbar_policy=Gtk.PolicyType.NEVER)
-        input_overlay = Gtk.Overlay(child=self.input)
+        self.input.set_bottom_margin(8)
+        self.input.set_right_margin(8)
+        input_scroll.set_child(self.input)
+        self.input_scroll = input_scroll
+        input_overlay = Gtk.Overlay(child=input_scroll)
         self.placeholder = label(tr("Change your system…"), "muted")
         self.placeholder.set_halign(Gtk.Align.START)
         self.placeholder.set_valign(Gtk.Align.START)
@@ -372,8 +394,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.placeholder.set_ellipsize(Pango.EllipsizeMode.END)
         input_overlay.add_overlay(self.placeholder)
         self.input.get_buffer().connect("changed", lambda b: self.placeholder.set_visible(b.get_char_count() == 0))
-        input_scroll.set_child(input_overlay)
-        self.input_area.append(input_scroll)
+        self.input.get_buffer().connect('changed', lambda _: self.follow_cursor())
+        self.input.get_buffer().connect('mark-set', lambda buffer, _location, mark:
+                                       self.follow_cursor() if mark == buffer.get_insert() else None)
+        self.input_area.append(input_overlay)
+        self.image_strip = box(False, 6)
+        self.image_strip.set_visible(False)
+        self.input_area.append(self.image_strip)
+        self.input.connect('paste-clipboard', self.paste_image)
         self.input.set_tooltip_text(tr("Change your system…"))
         composer_keys = Gtk.EventControllerKey()
         composer_keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
@@ -493,6 +521,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.dismiss()
 
     def dismiss(self):
+        self.save_conversation()
         self.save_settings()
         self.set_visible(False)
         self.quit_if_idle()
@@ -539,7 +568,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.remember_selection()
         self.thread_ids[self.agent()] = self.thread_id
         self.settings.update(agent=self.agent(), publish=self.publish.get_active(),
-                             thread_id=self.thread_ids.get("codex"), thread_ids=self.thread_ids)
+                             thread_id=self.thread_ids.get("codex"), thread_ids=self.thread_ids, history_ids=self.history_ids)
         private_write(self.settings_file, self.settings)
 
     def agent_changed(self):
@@ -553,6 +582,12 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.save_conversation()
             self.close_client()
             self.thread_id = self.thread_ids.get(self.agent())
+            self.history_id = self.history_ids.get(self.agent())
+            record = self.history.get(self.history_id)
+            self.replay_context = record.get('replay_context', []) if record else []
+            if record and record.get('repository'):
+                self.settings.update(repository=record['repository'], branch=record.get('branch', ''))
+            self.restore_draft(record.get('draft', {}) if record else {})
             self.session_file = self.locations["state"] / ("conversation.json" if self.agent() == "codex" else "conversation-" + self.agent() + ".json")
             self.messages, self.cards, self.message_entries, self.tool_items = [], {}, {}, {}
             if self.reply_body:
@@ -564,10 +599,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.transcript.remove(self.transcript.get_first_child())
             for message in read_json(self.session_file, [])[-100:]:
                 self.add_message(message["role"], message["text"], save=False,
-                                 choices_answered=message.get('choices_answered', False))
+                                 choices_answered=message.get('choices_answered', False), images=message.get('images', []))
         self.selected_agent = self.agent()
         if previous != self.agent():
-            self.queue_paused = bool(self.outbox.for_agent(self.agent()))
+            self.queue_paused = bool(self.current_queue())
         self.render_models()
         self.show_idle_content()
         self.status.set_text(tr('Ready · ') + AGENTS[self.agent()])
@@ -751,16 +786,17 @@ class SettingsWindow(Gtk.ApplicationWindow):
         return self.settings.get('permissions', 'auto')
 
     def update_buttons(self):
-        available = not self.busy and not self.terminal_pid and not self.delivery_pending
+        available = not self.busy and not self.terminal_pid and not self.delivery_pending and not self.image_pastes
         installed = bool(self.executables[self.agent()])
         running = self.busy or bool(self.terminal_pid)
         self.send_button.set_label(tr('Queue') if running or self.delivery_pending else tr('Send'))
-        self.send_button.set_sensitive(installed)
+        self.send_button.set_sensitive(installed and not self.image_pastes)
         self.send_button.set_tooltip_text(tr('Enter: queue. Ctrl+Enter: send now. Shift+Enter: new line.')
                                          if running else tr('Enter: send. Shift+Enter: new line.'))
         self.sync_button.set_sensitive(available and installed and not self.panels)
         self.terminal_button.set_sensitive(True)
-        self.new_button.set_sensitive(available and not self.panels and not self.outbox.for_agent(self.agent()))
+        self.new_button.set_sensitive(available and not self.panels)
+        self.history_button.set_sensitive(not self.panels)
         self.agent_select.set_sensitive(available)
         self.model_select.set_sensitive(available and bool(self.executables[self.agent()]) and self.agent() in MODEL_AGENTS)
         self.effort_select.set_sensitive(available and len(self.effort_values) > 1)
@@ -798,7 +834,73 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.save_conversation()
         self.update_choices()
 
+    def follow_cursor(self):
+        if self.cursor_scroll_id is None:
+            def scroll():
+                self.cursor_scroll_id = None
+                self.input.scroll_mark_onscreen(self.input.get_buffer().get_insert())
+                return False
+            self.cursor_scroll_id = GLib.idle_add(scroll)
+
+    def paste_image(self, view, *, from_signal=True):
+        clipboard = view.get_clipboard()
+        formats = clipboard.get_formats()
+        if not (formats.contain_gtype(Gdk.Texture) or any(
+                mime.startswith('image/') for mime in formats.get_mime_types())):
+            return False  # Let TextView paste ordinary text at the cursor.
+        if from_signal:
+            view.stop_emission_by_name('paste-clipboard')
+        if self.agent() not in NATIVE_AGENTS or self.terminal_pid:
+            self.status.set_text(tr('Paste images directly into the external agent terminal.'))
+            return True
+        if len(self.draft_images) + self.image_pastes >= MAX_IMAGES:
+            self.status.set_text(tr('Attach up to 4 images per message.'))
+            return True
+        self.image_pastes += 1
+        self.update_buttons()
+        def received(source, result):
+            try:
+                texture = source.read_texture_finish(result)
+                if texture is None:
+                    raise ValueError(tr('Could not read the clipboard image.'))
+                data = texture.save_to_png_bytes().get_data()
+                path = save_image(self.locations['state'] / 'attachments', data)
+                self.draft_images.append(path)
+                self.update_images()
+            except (GLib.Error, OSError, ValueError) as error:
+                self.status.set_text(str(error))
+            finally:
+                self.image_pastes -= 1
+                self.update_buttons()
+        clipboard.read_texture_async(None, received)
+        return True
+
+    def update_images(self):
+        while self.image_strip.get_first_child():
+            self.image_strip.remove(self.image_strip.get_first_child())
+        for index, path in enumerate(self.draft_images, 1):
+            tile = box(False, 0)
+            try:
+                texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(image_bytes(path)))
+                picture = Gtk.Image.new_from_paintable(texture)
+                picture.set_pixel_size(40)
+                tile.append(picture)
+            except (GLib.Error, OSError, ValueError):
+                tile.append(Gtk.Image.new_from_icon_name('image-missing-symbolic'))
+            title = tr('Remove image {number}', number=index)
+            tile.append(self.queue_action('window-close-symbolic', title,
+                        lambda _, p=path: self.remove_image(p)))
+            self.image_strip.append(tile)
+        self.image_strip.set_visible(bool(self.draft_images))
+
+    def remove_image(self, path):
+        self.draft_images.remove(path)
+        self.update_images()
+
     def composer_key(self, _controller, key, _code, state):
+        if ((key in (Gdk.KEY_v, Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK) or
+                (key == Gdk.KEY_Insert and state & Gdk.ModifierType.SHIFT_MASK)):
+            return self.paste_image(self.input, from_signal=False)
         if key not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             return False
         if state & Gdk.ModifierType.SHIFT_MASK:
@@ -806,18 +908,20 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.send(immediate=bool(state & Gdk.ModifierType.CONTROL_MASK))
         return True
 
-    def queue_message(self, text, *, first=False):
+    def queue_message(self, text, *, first=False, images=()):
         if not self.settings.get("repository"):
             self.setup()
             return None
+        self.ensure_history_id(text)
         entry = self.outbox.add(self.agent(), self.settings["repository"], self.settings.get("branch", ""),
-                                self.thread_id, text, self.publish.get_active(), first=first)
+                                self.thread_id, text, self.publish.get_active(), first=first, images=images, conversation_id=self.history_id)
+        self.save_conversation()
         self.save_settings()
         self.update_buttons()
         return entry
 
     def update_queue(self):
-        entries = self.outbox.for_agent(self.agent())
+        entries = self.current_queue()
         self.queue_area.set_visible(bool(entries))
         native = self.agent() in NATIVE_AGENTS and not self.terminal_pid
         count = tr('{count} queued', count=len(entries))
@@ -836,9 +940,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         for entry in entries:
             row = box(False, 2)
             row.add_css_class('queue-row')
-            preview = Gtk.Label(label=' '.join(entry['text'].split()), xalign=0, hexpand=True,
+            preview = Gtk.Label(label=' '.join(message_text(entry['text'], entry.get('images', [])).split()), xalign=0, hexpand=True,
                                 ellipsize=Pango.EllipsizeMode.END, width_chars=1, max_width_chars=1)
-            details = [entry['text'], tr('Push changes') if entry['publish'] else tr('Local changes only')]
+            details = [message_text(entry['text'], entry.get('images', [])), tr('Push changes') if entry['publish'] else tr('Local changes only')]
             warning = None
             if not self.queue_matches(entry):
                 warning = tr('From another conversation or repository. Edit to reuse.')
@@ -891,14 +995,17 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if entry not in self.outbox.entries or entry.get('state') == 'sending' or entry is self.redirect_entry:
             return
         buffer = self.input.get_buffer()
-        if buffer.get_char_count():
+        if buffer.get_char_count() or self.draft_images or self.image_pastes:
             self.status.set_text(tr('Keep or clear your draft before editing a queued message.'))
             self.input.grab_focus()
             return
         self.queue_paused = True
         self.publish.set_active(entry['publish'])
         buffer.set_text(entry['text'])
+        self.draft_images = list(entry.get('images', []))
+        self.update_images()
         self.outbox.remove(entry)
+        self.save_conversation()
         self.update_buttons()
         self.input.grab_focus()
 
@@ -919,12 +1026,16 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 or entry.get('state') != 'pending' or not self.queue_matches(entry)):
             return
         if self.busy:
-            self.steer(entry['text'], queued_entry=entry)
+            self.steer(entry['text'], queued_entry=entry, images=entry.get('images', []))
         else:
-            self.submit(entry['text'], queued_entry=entry, publish=entry['publish'])
+            self.submit(entry['text'], queued_entry=entry, publish=entry['publish'], images=entry.get('images', []))
+
+    def current_queue(self):
+        return [entry for entry in self.outbox.for_agent(self.agent())
+                if not entry.get('conversation_id') or entry['conversation_id'] == self.history_id]
 
     def queue_matches(self, entry):
-        return self.outbox.matches(entry, self.settings.get('repository'), self.settings.get('branch', ''), self.thread_id)
+        return (not entry.get('conversation_id') or entry['conversation_id'] == self.history_id) and self.outbox.matches(entry, self.settings.get('repository'), self.settings.get('branch', ''), self.thread_id)
 
     def drain_queue(self):
         if self.busy or self.delivery_pending or self.terminal_pid or self.stopping:
@@ -932,7 +1043,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.redirect_entry:
             entry, self.redirect_entry = self.redirect_entry, None
         elif not self.queue_paused and self.agent() in NATIVE_AGENTS:
-            entries = self.outbox.for_agent(self.agent())
+            entries = self.current_queue()
             entry = entries[0] if entries else None
         else:
             return False
@@ -941,16 +1052,18 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.queue_paused = True
                 self.update_buttons()
                 return False
-            if not self.submit(entry['text'], queued_entry=entry, publish=entry['publish']):
+            if not self.submit(entry['text'], queued_entry=entry, publish=entry['publish'], images=entry.get('images', [])):
                 self.queue_paused = True
                 self.update_buttons()
         return False
 
-    def add_message(self, role, text, identifier=None, save=True, *, complete=True, choices_answered=False):
+    def add_message(self, role, text, identifier=None, save=True, *, complete=True, choices_answered=False, images=()):
         if self.reply_body:
             self.reply_body.set_choices_enabled(False)
         self.reply_body = None
         entry = {"role": role, "text": text}
+        if images:
+            entry['images'] = list(images)
         if choices_answered:
             entry['choices_answered'] = True
         card = box(spacing=6)
@@ -959,7 +1072,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             card.add_css_class("user-message")
         card.append(label(role, "card-role"))
         is_agent = role in {tr('Agent'), 'Agent', 'Agente'} and self.agent() in NATIVE_AGENTS
-        body = MessageBody(text, complete=complete, choices_answered=choices_answered,
+        body = MessageBody(message_text(text, images), complete=complete, choices_answered=choices_answered,
                            on_choice=(lambda q, a: self.reply_to_choice(body, entry, q, a)) if is_agent else None)
         if is_agent:
             self.reply_body = body
@@ -978,8 +1091,39 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.scroll.to_end(force=role == tr('You'))
         return body
 
+    def ensure_history_id(self, text=''):
+        if self.history_id is None:
+            agent = self.selected_agent or self.agent()
+            self.history_id = self.history.new_id(conversation_name(text), agent)
+            self.history_ids[agent] = self.history_id
+            self.settings['history_ids'] = self.history_ids
+            private_write(self.settings_file, self.settings)
+        return self.history_id
+
+    def restore_draft(self, draft):
+        self.input.get_buffer().set_text(draft.get('text', ''))
+        self.draft_images = list(draft.get('images', []))
+        self.publish.set_active(draft.get('publish', self.settings.get('publish', True)))
+        self.update_images()
+
     def save_conversation(self):
         private_write(self.session_file, self.messages[-150:])
+        buffer = self.input.get_buffer()
+        draft = {'text': buffer.get_text(*buffer.get_bounds(), False),
+                 'images': list(self.draft_images), 'publish': self.publish.get_active()}
+        if not (self.messages or draft['text'] or draft['images'] or self.history_id):
+            return
+        agent = self.selected_agent or self.agent()
+        text = next((m['text'] for m in self.messages if m['role'] in {'You', 'Você', 'Tú'}), draft['text'])
+        named = self.settings.get('conversation_names', {}).get(agent, {})
+        name = named.get('name') if named.get('thread_id') == self.thread_id else None
+        identifier = self.ensure_history_id(text)
+        self.history.save(identifier, {
+            'name': name or conversation_name(text), 'agent': agent, 'thread_id': self.thread_id,
+            'repository': self.settings.get('repository', ''), 'branch': self.settings.get('branch', ''),
+            'draft': draft, 'replay_context': self.replay_context,
+            'selection': self.settings.get('selections', {}).get(agent, {}),
+        }, self.messages)
 
     def remember_conversation_name(self, agent, thread_id, name, named):
         if self.agent() != agent or self.thread_id != thread_id:
@@ -1003,7 +1147,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.redirect_entry = None
         self.stopping = False
         self.delivery_pending = False
-        for entry in self.outbox.for_agent(self.agent()):
+        for entry in self.current_queue():
             if entry.get('state') == 'sending':
                 self.outbox.mark(entry, 'uncertain')
         self.finish_activity("failed")
@@ -1017,27 +1161,36 @@ class SettingsWindow(Gtk.ApplicationWindow):
     def send(self, *_, queued=False, immediate=False):
         buffer = self.input.get_buffer()
         text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False).strip()
-        if text:
+        images = list(self.draft_images)
+        if self.image_pastes:
+            return
+        if images and (self.agent() not in NATIVE_AGENTS or self.terminal_pid):
+            self.status.set_text(tr('Use Codex or Claude to send these images, or remove them.'))
+            return
+        if text or images:
             running = self.busy or self.terminal_pid or self.delivery_pending
             if queued or (running and not immediate):
-                accepted = self.queue_message(text) is not None
+                accepted = self.queue_message(text, images=images) is not None
             elif self.terminal_pid:
-                accepted = self.queue_message(text) is not None
+                accepted = self.queue_message(text, images=images) is not None
                 if accepted:
                     self.copy_to_terminal(text)
             elif self.busy:
-                accepted = self.steer(text)
+                accepted = self.steer(text, **({"images": images} if images else {}))
             elif self.delivery_pending:
                 accepted = False
             else:
-                accepted = self.submit(text)
+                accepted = self.submit(text, **({"images": images} if images else {}))
             if accepted:
                 buffer.set_text("")
+                self.draft_images = []
+                self.update_images()
+                self.save_conversation()
 
-    def steer(self, text, *, queued_entry=None):
+    def steer(self, text, *, queued_entry=None, images=()):
         if self.delivery_pending or self.stopping or not self.turn_id or self.agent() not in NATIVE_AGENTS:
             return False
-        entry = queued_entry or self.queue_message(text, first=True)
+        entry = queued_entry or self.queue_message(text, first=True, images=images)
         if not entry:
             return False
         self.delivery_pending = True
@@ -1058,7 +1211,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             if not is_claude:
                 if entry in self.outbox.entries:
                     self.outbox.remove(entry)
-                self.add_message(tr('You'), text)
+                self.add_message(tr('You'), text, images=images)
             self.update_buttons()
             self.drain_queue()
             self.quit_if_idle()
@@ -1075,7 +1228,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.update_buttons()
             self.quit_if_idle()
         self.worker(lambda: client.request('turn/interrupt', {'threadId': thread_id, 'turnId': turn_id})
-                    if is_claude else client.steer(thread_id, turn_id, text), accepted, rejected)
+                    if is_claude else client.steer(thread_id, turn_id, text, **({"images": images} if images else {})), accepted, rejected)
         return True
 
     def sync(self):
@@ -1084,7 +1237,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return
         self.submit(tr('Sync'), sync=True)
 
-    def submit(self, text, sync=False, create=False, *, queued_entry=None, publish=None, review_existing=False):
+    def submit(self, text, sync=False, create=False, *, queued_entry=None, publish=None, review_existing=False, images=()):
         if self.busy or self.terminal_pid or self.delivery_pending:
             self.status.set_text(tr('Stop the current task first.'))
             return False
@@ -1093,6 +1246,15 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return False
         if self.agent() == "codex" and not shutil.which("codex"):
             self.failure(tr('Install Codex or choose another agent.'))
+            return False
+        if images and self.agent() not in NATIVE_AGENTS:
+            self.status.set_text(tr('Use Codex or Claude to send these images, or remove them.'))
+            return False
+        try:
+            for path in images:
+                image_bytes(path)
+        except (OSError, ValueError):
+            self.status.set_text(tr('The image attachment is missing or invalid.'))
             return False
         self.save_settings()
         try:
@@ -1106,6 +1268,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         except ValueError as error:
             self.failure(str(error))
             return False
+        if self.replay_context and not self.thread_id:
+            prompt = transcript_context(self.replay_context) + prompt
         self.last_prompt = prompt
         self.stopping = False
         self.active_task = begin_task(
@@ -1119,7 +1283,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.client.model, self.client.effort, self.client.permission_mode
         ) != (model, effort, self.permission_mode()):
             self.close_client()
-        self.add_message(tr('You'), text)
+        self.add_message(tr('You'), text, images=images)
         self.busy = True
         self.delivery_pending = True
         if queued_entry:
@@ -1163,7 +1327,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 previous_thread = self.thread_id
                 self.thread_id = result["thread"]["id"]
                 self.thread_loaded = True
-                ui(self.outbox.bind_thread, agent, repository, branch, previous_thread, self.thread_id)
+                ui(self.outbox.bind_thread, agent, repository, branch, previous_thread, self.thread_id, self.history_id)
                 ui(self.save_settings)
                 if not previous_thread:
                     # Name only new sessions, once. Resuming must preserve a
@@ -1174,7 +1338,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
                     except (RpcError, OSError):
                         named = False  # Older CLIs may not support renaming.
                     ui(self.remember_conversation_name, agent, self.thread_id, name, named)
-            return self.client.turn(self.thread_id, prompt, model, effort)
+            return self.client.turn(self.thread_id, prompt, model, effort, **({"images": list(images)} if images else {}))
         self.worker(execute, lambda r: self.started(r["turn"]["id"], queued_entry) if client is self.client else None)
         return True
 
@@ -1184,6 +1348,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.active_task = None
 
     def started(self, turn_id, queued_entry=None):
+        self.replay_context = []
+        self.save_conversation()
         self.delivery_pending = False
         if self.busy:
             self.turn_id = turn_id
@@ -1524,7 +1690,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         terminal([os.environ.get("SHELL", "/bin/bash")])
 
     def resume_in_terminal(self):
-        if self.busy or self.terminal_pid or self.delivery_pending or self.outbox.for_agent(self.agent()) or not self.thread_id:
+        if self.busy or self.terminal_pid or self.delivery_pending or self.current_queue() or not self.thread_id:
             return
         self.close_client()
         if self.agent() == "claude":
@@ -1568,42 +1734,141 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.question_windows.clear()
         self.update_attention(force=True)
 
-    def new_chat(self):
-        if self.busy or self.terminal_pid or self.delivery_pending:
-            return
-        if self.outbox.for_agent(self.agent()):
-            self.queue_toggle.grab_focus()
-            return
-        self.queue_paused = False
-        self.close_client()
-        if self.messages:
-            record = self.settings.get('conversation_names', {}).get(self.agent(), {})
-            name = record.get('name') if record.get('thread_id') == self.thread_id else None
-            if not name:
-                text = next((m['text'] for m in self.messages if m['role'] in {'You', 'Você', 'Tú'}), '')
-                name = conversation_name(text)
-            private_write(self.locations['state'] / 'history' / archive_filename(name, self.agent()), self.messages)
-        self.settings.get('conversation_names', {}).pop(self.agent(), None)
-        self.thread_id = None
-        self.thread_loaded = False
-        self.messages = []
+    def can_switch_conversation(self):
+        return not (self.busy or self.terminal_pid or self.delivery_pending or self.image_pastes or self.question_windows)
+
+    def clear_transcript(self):
+        self.messages, self.cards, self.message_entries, self.tool_items = [], {}, {}, {}
         if self.reply_body:
             self.reply_body.set_choices_enabled(False)
         self.reply_body = None
-        self.external_prompt = ""
+        self.external_prompt = ''
         self.external_prompt_area.set_visible(False)
-        self.cards = {}
-        self.message_entries = {}
-        self.tool_items = {}
         while self.transcript.get_first_child():
             self.transcript.remove(self.transcript.get_first_child())
+
+    def new_chat(self):
+        if not self.can_switch_conversation():
+            return
+        self.save_conversation()
+        self.queue_paused = False
+        self.close_client()
+        self.settings.get('conversation_names', {}).pop(self.agent(), None)
+        self.history_ids.pop(self.agent(), None)
+        self.history_id = None
+        self.replay_context = []
+        self.thread_id = None
+        self.thread_loaded = False
+        self.restore_draft({})
+        self.clear_transcript()
         self.save_conversation()
         self.save_settings()
         self.status.set_text(tr('Ready'))
         self.show_idle_content()
+        self.update_buttons()
+
+    def show_history(self):
+        if self.history_panel in self.panels:
+            return
+        self.save_conversation()
+        dialog = Panel(self, tr('Conversation history'))
+        self.history_panel = dialog
+        content = box(spacing=10)
+        search = Gtk.SearchEntry(placeholder_text=tr('Search conversations'))
+        content.append(search)
+        listing = box(spacing=6)
+        content.append(listing)
+        if not self.can_switch_conversation():
+            content.append(label(tr('Finish or stop the current task before switching conversations.'), 'muted'))
+        records = self.history.entries()
+        def render(*_):
+            while listing.get_first_child():
+                listing.remove(listing.get_first_child())
+            query = search.get_text().casefold().strip()
+            for record in records:
+                agent = record.get('agent')
+                agent_name = AGENTS.get(agent, tr('Older archive'))
+                repo = record.get('repository', '')
+                if query and query not in (record['name'] + ' ' + agent_name + ' ' + repo).casefold():
+                    continue
+                current = record['id'] == self.history_id
+                row = box(spacing=4)
+                title = Gtk.Label(label=record['name'], xalign=0, hexpand=True,
+                                  ellipsize=Pango.EllipsizeMode.END, max_width_chars=1)
+                row.append(title)
+                date = datetime.fromtimestamp(record['updated_at']).strftime('%d/%m/%Y %H:%M')
+                details = agent_name + ' · ' + date
+                if current:
+                    details += ' · ' + tr('Current conversation')
+                elif not record.get('thread_id'):
+                    details += ' · ' + tr('Continue from saved transcript')
+                detail = Gtk.Label(label=details, xalign=0, ellipsize=Pango.EllipsizeMode.END, max_width_chars=1)
+                detail.add_css_class('muted')
+                row.append(detail)
+                button = Gtk.Button(child=row, tooltip_text=record['name'] + ('\n' + repo if repo else ''))
+                button.set_sensitive(current or self.can_switch_conversation())
+                button.connect('clicked', lambda _, key=record['id']: self.open_conversation(key))
+                listing.append(button)
+            if not listing.get_first_child():
+                listing.append(label(tr('No conversations found.'), 'muted'))
+        search.connect('search-changed', render)
+        render()
+        dialog.set_content(content)
+        dialog.present()
+        search.grab_focus()
+
+    def open_conversation(self, identifier):
+        if identifier == self.history_id:
+            if self.history_panel in self.panels:
+                self.history_panel.destroy()
+            return True
+        if not self.can_switch_conversation():
+            self.status.set_text(tr('Finish or stop the current task before switching conversations.'))
+            return False
+        record = self.history.get(identifier)
+        if record is None:
+            self.status.set_text(tr('This conversation is no longer available.'))
+            return False
+        self.save_conversation()
+        agent = record.get('agent')
+        if agent not in NATIVE_AGENTS:
+            agent = self.agent() if self.agent() in NATIVE_AGENTS else 'codex'
+        self.agent_select.set_selected(self.agent_ids.index(agent))
+        self.close_client()
+        if self.history_panel in self.panels:
+            self.history_panel.destroy()
+        self.history_id = record['id']
+        self.history_ids[agent] = self.history_id
+        self.thread_id = record.get('thread_id')
+        self.thread_loaded = False
+        self.replay_context = record['messages'] if not self.thread_id else []
+        if record.get('repository'):
+            self.settings.update(repository=record['repository'], branch=record.get('branch', ''))
+        if record.get('selection'):
+            self.settings.setdefault('selections', {})[agent] = record['selection']
+            self.render_models()
+        self.settings.setdefault('conversation_names', {})[agent] = {
+            'name': record['name'], 'thread_id': self.thread_id}
+        self.clear_transcript()
+        for message in record['messages']:
+            self.add_message(message['role'], message['text'], save=False,
+                             choices_answered=message.get('choices_answered', False), images=message.get('images', []))
+        self.restore_draft(record.get('draft', {}))
+        self.queue_paused = bool(self.current_queue())
+        self.save_conversation()
+        self.save_settings()
+        self.show_idle_content()
+        self.update_buttons()
+        self.scroll.to_end(force=True)
+        self.status.set_text(tr('Conversation restored.') if self.thread_id else
+                             tr('Your next message will start a new session using this saved transcript.'))
+        self.input.grab_focus()
+        return True
 
     def setup(self):
-        locked = bool(self.busy or self.terminal_pid or self.delivery_pending or self.outbox.entries)
+        if self.history_panel in self.panels:
+            return False
+        locked = bool(self.busy or self.terminal_pid or self.delivery_pending or self.current_queue())
         if self.setup_panel in self.panels:
             return False
         dialog = Panel(self, tr('Settings'))
@@ -1649,12 +1914,12 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 error_label.set_visible(True)
                 return
             changed = value != self.settings.get("repository") or branch_value != self.settings.get("branch", "")
+            if changed:
+                self.new_chat()
             self.settings.update(repository=value, branch=branch_value)
             if self.agent() in NATIVE_AGENTS:
                 self.settings['claude_permissions' if is_claude else 'permissions'] = modes[mode.get_selected()]
             self.thread_loaded = False
-            if changed:
-                self.new_chat()
             self.save_settings()
             dialog.destroy()
             if create:
@@ -1683,9 +1948,18 @@ class SettingsWindow(Gtk.ApplicationWindow):
         version = read_json(ROOT / 'manifest.json', {}).get('version')
         if version:
             footer = label('v' + version, 'muted', selectable=True)
+            footer.set_wrap(False)
             footer.add_css_class('settings-version')
             footer.set_halign(Gtk.Align.END)
-            dialog.append(footer)
+            version_row = box(False, 8)
+            version_row.set_halign(Gtk.Align.END)
+            repository_link = Gtk.LinkButton(uri='https://github.com/JohanKRS/omarchy-settings-sync', label='GitHub')
+            repository_link.set_tooltip_text(tr('Project repository'))
+            repository_link.add_css_class('flat')
+            repository_link.get_child().add_css_class('settings-version')
+            version_row.append(repository_link)
+            version_row.append(footer)
+            dialog.append(version_row)
         if locked:
             for widget in (repository, branch, mode, existing, create):
                 widget.set_sensitive(False)
@@ -1727,8 +2001,11 @@ class Application(Gtk.Application):
         if "--quit" in arguments:
             if self.window and (self.window.busy or self.window.terminal_pid or self.window.question_windows or self.window.delivery_pending):
                 return 1
-            if self.window and self.window.client:
-                self.window.client.close()
+            if self.window:
+                self.window.save_conversation()
+                self.window.save_settings()
+                if self.window.client:
+                    self.window.client.close()
             self.quit()
             return 0
         options = dict(arg[2:].split("=", 1) for arg in arguments if arg.startswith("--") and "=" in arg)

@@ -6,6 +6,7 @@ import queue
 import subprocess
 import threading
 import uuid
+from attachments import claude_content
 
 from catalog import normalize_claude_models
 from core import CodexClient, RpcError, paths
@@ -88,12 +89,13 @@ class ClaudeClient(CodexClient):
             raise RpcError('Cannot rename a different Claude session')
         return self.request('rename_session', {'title': name, 'source': 'host'}, timeout=5)
 
-    def turn(self, thread_id, text, model=None, effort=None):
+    def turn(self, thread_id, text, model=None, effort=None, *, images=()):
+        content = claude_content(text, images)
         self.turn_id = str(uuid.uuid4())
         self.interrupted = self.had_text = False
         self.emit("turn/started", {"turn": {"id": self.turn_id}})
         self.send({"type": "user", "session_id": self.session_id,
-                   "message": {"role": "user", "content": text}, "parent_tool_use_id": None})
+                   "message": {"role": "user", "content": content}, "parent_tool_use_id": None})
         return {"turn": {"id": self.turn_id}}
 
     def emit(self, method, params):

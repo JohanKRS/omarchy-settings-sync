@@ -11,6 +11,36 @@ from message_choices import choice_groups
 from i18n import tr
 
 
+class TableView(Gtk.Box):
+    """Measure wrapped cells at their allocated width, not the narrow minimum.
+
+    ScrolledWindow with horizontal scrolling requests a constant height. A
+    height-for-width parent must supply the grid's actual wrapped height.
+    """
+    def __init__(self, grid):
+        super().__init__(hexpand=True)
+        self.set_layout_manager(None)
+        self.grid = grid
+        self.scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+                                         vscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.scroll.set_child(grid)
+        self.append(self.scroll)
+
+    def do_get_request_mode(self):
+        return Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH
+
+    def do_measure(self, orientation, for_size):
+        if orientation == Gtk.Orientation.HORIZONTAL:
+            _, natural, _, _ = self.grid.measure(orientation, -1)
+            return 0, natural, -1, -1
+        width = max(for_size, self.grid.measure(Gtk.Orientation.HORIZONTAL, -1)[0])
+        minimum, natural, _, _ = self.grid.measure(orientation, width)
+        return minimum, natural, -1, -1
+
+    def do_size_allocate(self, width, height, baseline):
+        self.scroll.allocate(width, height, baseline, None)
+
+
 def markup_label(markup, *, xalign=0):
     label = Gtk.Label(xalign=xalign, yalign=0, wrap=True, selectable=True, hexpand=True)
     label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
@@ -144,8 +174,4 @@ class MessageBody(Gtk.Box):
                     widget.add_css_class('markdown-table-header')
                 grid.attach(widget, x, y, 1, 1)
         # Wide tables scroll locally; normal two/three-column tables wrap to fit.
-        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
-                                    vscrollbar_policy=Gtk.PolicyType.NEVER,
-                                    propagate_natural_height=True, hexpand=True)
-        scroll.set_child(grid)
-        return scroll
+        return TableView(grid)

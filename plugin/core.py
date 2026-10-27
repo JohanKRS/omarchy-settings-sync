@@ -14,6 +14,7 @@ import tomllib
 from urllib.parse import urlparse
 from i18n import LANGUAGE, tr
 from context import snapshot
+from attachments import codex_input
 
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN_ID = "community.agent-settings"
@@ -219,7 +220,7 @@ class CodexClient:
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
         self.request("initialize", {
-            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.1.12"},
+            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.1.13"},
             "capabilities": {"experimentalApi": True},
         })
         self.notify("initialized", {})
@@ -319,8 +320,8 @@ class CodexClient:
             args["threadId"] = thread_id
         return self.request("thread/resume" if thread_id else "thread/start", args)
 
-    def turn(self, thread_id, text, model=None, effort=None):
-        args = {"threadId": thread_id, "input": [{"type": "text", "text": text}]}
+    def turn(self, thread_id, text, model=None, effort=None, *, images=()):
+        args = {"threadId": thread_id, "input": codex_input(text, images)}
         if model:
             args["model"] = model
         if effort:
@@ -330,10 +331,10 @@ class CodexClient:
     def set_thread_name(self, thread_id, name):
         return self.request('thread/name/set', {'threadId': thread_id, 'name': name}, timeout=5)
 
-    def steer(self, thread_id, turn_id, text):
+    def steer(self, thread_id, turn_id, text, *, images=()):
         return self.request("turn/steer", {
             "threadId": thread_id, "expectedTurnId": turn_id,
-            "input": [{"type": "text", "text": text}],
+            "input": codex_input(text, images),
         })
 
 

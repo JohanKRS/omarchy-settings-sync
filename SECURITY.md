@@ -40,7 +40,13 @@ maintenance guarantee.
 The plugin uses existing CLI authentication; it does not ask for an API key or
 copy credentials from another application. Local settings, conversations,
 activity records and logs are stored under the XDG locations documented in the
-README. Newly written state files use owner-only permissions.
+README. Newly written state files use owner-only permissions. Pasted images are
+stored as PNG files under the private state `attachments/` directory. Only an
+explicit paste reads a clipboard image; sending the prompt passes its images to
+the selected native agent/provider. Codex receives local image paths over stdin;
+Claude receives base64 image blocks over stdin. Files remain in local state for
+queued work and conversation records until the user removes that state. Detaching
+an image does not erase stored files or provider history.
 
 The configured agent/provider receives prompts and may read or transmit relevant
 configuration content. Enabled MCP servers have their own access and data

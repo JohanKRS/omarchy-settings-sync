@@ -12,7 +12,8 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 os.environ['AGENT_SETTINGS_LANGUAGE'] = 'en'
 sys.path.insert(0, str(ROOT / 'plugin'))
-from app import Gtk, GLib, SettingsWindow, LayerShell
+from app import Gtk, Gdk, GLib, SettingsWindow, LayerShell
+from attachments import save_image
 from core import private_write
 
 MODELS = [{'model': '', 'displayName': 'Default', 'supportedReasoningEfforts': []}]
@@ -47,6 +48,9 @@ with tempfile.TemporaryDirectory(prefix='omarchy-settings-preview-') as temp:
         window = SettingsWindow(application)
         LayerShell.set_keyboard_mode(window, LayerShell.KeyboardMode.NONE)
         window.set_can_target(False)
+        for controller in list(window.observe_controllers()):
+            if isinstance(controller, (Gtk.GestureClick, Gtk.EventControllerKey)):
+                window.remove_controller(controller)
         window.present()
         settle()
         x, y, width, height = map(int, window.popup_bounds)
@@ -110,10 +114,23 @@ xdg-user-dir DESKTOP
         window.status.set_text('Working…')
         window.update_buttons()
         window.input.grab_focus()
+        texture = Gdk.Texture.new_from_filename(str(ROOT / 'docs/settings.png'))
+        window.draft_images = [save_image(window.locations['state'] / 'attachments',
+                                         texture.save_to_png_bytes().get_data())]
+        window.update_images()
+        window.input.emit('insert-at-cursor',
+                          'Use the screenshot to check the current settings.\n'
+                          'Keep the shared configuration portable.\n'
+                          'Preserve this machine’s display settings.\n'
+                          'Document how to apply the changes elsewhere.\n'
+                          'Keep the cursor visible as this request grows.')
         settle()
         window.scroll.get_vadjustment().set_value(110)
         settle()
         subprocess.run(['grim', '-g', region, str(ROOT / 'docs/conversation.png')], check=True)
+        window.input.get_buffer().set_text('')
+        window.draft_images = []
+        window.update_images()
         window.add_message('Agent', '''Which desktop folder do you prefer?
 
 1. **Desktop** — Keep shortcuts in `~/Desktop`.
@@ -123,6 +140,9 @@ xdg-user-dir DESKTOP
         window.scroll.to_end(force=True)
         settle()
         subprocess.run(['grim', '-g', region, str(ROOT / 'docs/choices.png')], check=True)
+        window.input.get_buffer().set_text('')
+        window.draft_images = []
+        window.update_images()
         # Verify the native spinner changes frames after hiding/reopening the
         # panel, the lifecycle that used to leave GTK's SVG paused.
         window.set_visible(False)
@@ -138,9 +158,21 @@ xdg-user-dir DESKTOP
             frames.append(hashlib.sha256(subprocess.check_output(['grim', '-g', spinner_region, '-'])).hexdigest())
         assert len(set(frames)) > 1, 'Activity indicator did not animate after reopening'
         window.busy = False
+        window.turn_id = None
         window.update_buttons()
+        for name, agent, topic in (
+                ('Settings Sync · Terminal font', 'codex', 'Use JetBrains Mono in my terminal.'),
+                ('Settings Sync · Shared keyboard shortcuts', 'claude', 'Sync my keyboard shortcuts.')):
+            key = window.history.new_id(name, agent)
+            window.history.save(key, {'name': name, 'agent': agent, 'thread_id': 'synthetic-session',
+                                     'repository': 'https://github.com/example/dotfiles', 'branch': ''},
+                                [{'role': 'You', 'text': topic}])
+        window.show_history()
+        settle()
+        subprocess.run(['grim', '-g', region, str(ROOT / 'docs/history.png')], check=True)
+        window.history_panel.destroy()
         window.client = None
         GLib.source_remove(window.theme_timer)
         GLib.source_remove(window.attention_timer)
         window.destroy()
-        print('Captured preview.png, docs/settings.png, docs/questions.png, docs/conversation.png and docs/choices.png; spinner animates after reopening')
+        print('Captured preview.png, docs/settings.png, docs/questions.png, docs/conversation.png, docs/choices.png and docs/history.png; spinner animates after reopening')

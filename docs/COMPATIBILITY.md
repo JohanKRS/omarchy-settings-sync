@@ -75,6 +75,20 @@ accounts have not been exercised in this environment.
 
 ## Follow-up support
 
+The 0.1.13 update was checked on Omarchy 4.0.6-1, GTK 4.24, Codex CLI
+0.164.0 and Claude Code 2.1.310. Codex's installed app-server schema confirms
+`localImage` input for turn start and steering; Claude's documented streaming
+input uses base64 PNG content blocks. Protocol fixtures cover delivery, invalid
+attachments and queue persistence without live model calls. Graphical checks
+cover clipboard callbacks, removable thumbnails, image-only prompts, queue edits,
+Codex steering, Claude interrupt-and-continue, long-prompt caret visibility,
+compact wrapped tables and horizontal overflow. The clipboard fixture uses
+synthetic textures without replacing the user's real clipboard. History fixtures
+verify native session resume, repository/branch restoration, per-conversation
+drafts and queues, search, active-task guards and continuing a legacy transcript
+without inventing a session ID. The portable suite now contains 61 tests.
+
+
 The 0.1.12 update shows the installed manifest version in a small Settings
 footer. Visual inspection confirms its bottom-right placement. The 51 portable
 tests, Portuguese graphical smoke test and launcher test pass.

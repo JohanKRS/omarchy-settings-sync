@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.13 — 2026-10-27
+
+- Browse and search local conversation history, then resume a native Codex or
+  Claude session with its repository, draft, images and queued work intact.
+  Keep queues separate between conversations. Older archives without session
+  IDs open with an explicit option to continue from their saved transcript.
+- Give Settings a distinct gear icon and place a GitHub repository link beside
+  the installed version.
+
+- Paste clipboard images into native Codex and Claude prompts, with removable
+  thumbnails. Keep images with queued messages, edits, immediate direction and
+  local conversation records. Support image-only requests; retain drafts when
+  an attachment is missing or the selected external agent cannot receive it.
+- Keep the prompt cursor visible when typing, wrapping or navigating through
+  text taller than the composer, without changing the panel's fixed size.
+- Measure Markdown tables at their displayed width to remove blank space below
+  the last row, while preserving wrapped cells and horizontal overflow scrolling.
+- Update the pinned GitHub Actions checkout and Python setup dependencies.
+
 ## 0.1.12 — 2026-10-22
 
 - Show the installed plugin version in small, muted text at the bottom-right

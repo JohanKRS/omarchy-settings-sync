@@ -92,6 +92,7 @@ URL. An empty branch uses the repository's default branch. See the
 | Message field | Request a specific change; optionally publish its reusable configuration |
 | **Enter / Send / Queue** | The same button sends when idle and queues while an agent is working |
 | Queue above the message field | Compact one-line previews with **Direct now / Send now**, **Edit** and **Remove** icons; pause/resume beside the count |
+| **Ctrl+V** with an image | Attach a screenshot to a native Codex/Claude prompt; remove it with the thumbnail’s × button |
 | **Ctrl+Enter** during native work | Steer Codex's current turn; interrupt and continue Claude in the same conversation |
 | Alternatives in a Codex/Claude conversation | Click an option to answer immediately, preserving the composer draft and queued messages |
 | **Copy request** for an external agent | Copy the initial request and context; paste into the CLI's message input and send |
@@ -104,7 +105,8 @@ URL. An empty branch uses the repository's default branch. See the
 | Settings | Configure the repository and permissions; inspect or refresh the installed agent's models |
 | **Settings → Review existing customizations** | Find portable system and app settings already on this machine and choose what to save to the configured repository |
 | **Continue conversation in terminal** | Resume an idle Codex/Claude conversation in its CLI |
-| New chat | Archive the current local conversation and start a fresh one |
+| History (clock icon) | Search local conversations and reopen one with its agent, repository, draft and queue |
+| New chat | Save the current conversation and draft in History, then start a fresh one |
 | Down arrow in the conversation | Shown while reading older messages; jump to the latest message and resume following replies |
 
 Escape closes the topmost question, settings panel or selector first. When an
@@ -123,6 +125,17 @@ code, quotes and checklists stay text. You can always answer in the message fiel
 Structured question and permission dialogs retain their existing controls.
 See the [clickable conversation choices](docs/choices.png).
 Shift+Enter inserts a newline in the panel's message field.
+Paste up to four clipboard images per message (PNG, at most 5 MiB each after
+conversion). Native Codex and Claude receive image content with the request,
+including image-only prompts, queued messages and immediate direction. Queued
+attachments survive restart and return to the composer when edited. Other agents
+use their terminal's own image attachment support. Images are saved privately in
+local state, retained with conversation/queue records, and are never added to the
+configuration repository by the plugin. Removing a thumbnail detaches it from
+that draft; it does not erase saved image files or copies already sent to an agent.
+
+The prompt editor follows the cursor while typing or navigating long text.
+
 The conversation follows newly laid-out text without clipping the final line,
 and stops following when you scroll up to read. Scrolling past an edge moves
 the text slightly and springs back, without the GTK edge glow. The animation
@@ -143,8 +156,9 @@ Follow-ups are saved locally per agent, repository, branch and conversation.
 After reopening the application, use **Resume queue** beside the inline count to continue.
 If delivery was not confirmed, review the conversation before editing and
 retrying that message. Editing preserves an existing composer draft; clear or
-queue the draft first. Send or remove pending messages before starting a new
-chat or changing repositories.
+queue the draft first. New chat keeps pending messages with the previous
+conversation in History. Send or remove its pending messages before changing
+that conversation’s repository.
 Editing moves the queued text and its publication choice back into the main
 message field. The queue is hidden when empty and scrolls within a limited
 height when several messages are pending. Hover over a preview to read the full
@@ -214,6 +228,22 @@ The display name and repository are now **Omarchy Settings Sync**. The permanent
 plugin ID (`community.agent-settings`) and existing data paths are retained, so
 renaming does not reset your settings or conversations.
 
+Open **History** (the clock icon in the header) to search conversations by name,
+agent or repository. Reopening restores the original native Codex/Claude session,
+repository and branch, model selection, unsent draft and image attachments.
+Switching never starts a model request or dispatches queued work; the restored
+queue stays paused until resumed. Finish or stop active work before switching.
+See the [conversation history preview](docs/history.png).
+The Settings gear is distinct from the app icon, and the installed version has
+a **GitHub** link to this project beside it.
+
+Archives from earlier versions did not store the native session ID or repository.
+They remain readable in History and are marked **Continue from saved transcript**.
+The next message creates a new session with up to 32,000 characters of recent
+saved transcript as context, using the currently configured repository. It does
+not recreate the original agent session or rerun earlier requests. New snapshots
+retain the metadata needed to resume the original native session.
+
 New native Codex and Claude Code conversations appear in the agent's history as
 **Settings Sync · <your first request>**. Names are shortened locally, without
 an extra model call, and stay unchanged on follow-ups or resume. Search for
@@ -225,6 +255,9 @@ filenames. Other CLIs keep their own naming behavior.
 | --- | --- |
 | `~/.config/omarchy-agent-settings/settings.json` | Repository, branch, selections, conversation IDs and names |
 | `~/.local/state/omarchy-agent-settings/` | Conversations, activity records, logs, model cache and backups |
+| `~/.local/state/omarchy-agent-settings/history/` | Searchable conversation snapshots; existing transcript files stay readable |
+| `~/.local/state/omarchy-agent-settings/history-index.json` | Session IDs, repository/branch, names and unsent drafts for History |
+| `~/.local/state/omarchy-agent-settings/attachments/` | Private pasted PNG images; retained until local state is removed |
 | `~/.local/state/omarchy-agent-settings/outbox.json` | Unsent follow-ups, including messages with unconfirmed delivery |
 | `~/.local/share/omarchy-agent-settings/workspace/` | Working copies of configuration repositories |
 

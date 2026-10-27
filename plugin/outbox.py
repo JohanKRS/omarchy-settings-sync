@@ -26,9 +26,13 @@ class Outbox:
     def for_agent(self, agent):
         return [entry for entry in self.entries if entry["agent"] == agent]
 
-    def add(self, agent, repository, branch, thread_id, text, publish, *, first=False):
+    def add(self, agent, repository, branch, thread_id, text, publish, *, first=False, images=(), conversation_id=None):
         entry = dict(id=str(uuid.uuid4()), agent=agent, repository=repository,
                      branch=branch, thread_id=thread_id, text=text, publish=publish, state="pending")
+        if images:
+            entry['images'] = list(images)
+        if conversation_id:
+            entry['conversation_id'] = conversation_id
         self.entries.insert(0 if first else len(self.entries), entry)
         self.save()
         return entry
@@ -41,8 +45,10 @@ class Outbox:
         entry["state"] = state
         self.save()
 
-    def bind_thread(self, agent, repository, branch, previous, current):
+    def bind_thread(self, agent, repository, branch, previous, current, conversation_id=None):
         for entry in self.for_agent(agent):
+            if entry.get('conversation_id') and entry['conversation_id'] != conversation_id:
+                continue
             if self.matches(entry, repository, branch, previous):
                 entry["thread_id"] = current
         self.save()
