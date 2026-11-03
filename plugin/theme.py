@@ -148,11 +148,11 @@ class Theme:
                                  color: alpha({fg}, .65); min-height: 24px; }}
             .view-tabs button:hover {{ color: {fg}; background: transparent; }}
             .view-tabs button:checked {{ color: {fg}; border-bottom-color: {accent}; background: transparent; }}
-            .feature-row {{ border: 1px solid alpha({fg}, .16); border-radius: {radius}px; padding: 10px 12px; }}
+            .feature-row {{ border-bottom: 1px solid alpha({fg}, .1); padding: 10px 2px; }}
             .feature-row.unavailable {{ opacity: .6; }}
             .feature-title {{ font-weight: 600; }}
-            .feature-group {{ font-size: {max(1, size - 1)}px; font-weight: 600; color: alpha({fg}, .65); margin-top: 4px; }}
-            .feature-details {{ border-top: 1px solid alpha({fg}, .12); padding-top: 8px; }}
+            .feature-group {{ font-size: {max(1, size - 1)}px; font-weight: 600; color: alpha({fg}, .65); margin-top: 12px; }}
+            .feature-details {{ padding: 4px 0 2px 14px; border-left: 2px solid alpha({accent}, .35); }}
             .feature-status {{ font-size: {max(1, size - 1)}px; padding: 1px 6px; border-radius: {radius}px; }}
             .status-applied {{ color: {good}; }}
             .status-pending, .status-staged {{ color: {warning}; }}
@@ -168,8 +168,8 @@ class Theme:
             switch:disabled {{ opacity: .4; }}
             radio {{ background: {bg}; border: 1px solid alpha({fg}, .4); }}
             radio:checked {{ background: {accent}; color: {bg}; border-color: {accent}; }}
-            .features-banner {{ border: 1px solid alpha({warning}, .6); background: alpha({warning}, .08);
-                                border-radius: {radius}px; padding: 8px 10px; }}
+            .features-banner {{ border-left: 2px solid {warning}; background: alpha({warning}, .06);
+                                padding: 8px 10px; }}
             .pending-bar {{ border-top: 1px solid alpha({fg}, .16); padding-top: 8px; }}
             button.destructive {{ color: {urgent}; border-color: alpha({urgent}, .6); }}
             button.destructive:hover:not(:disabled) {{ background: alpha({urgent}, .12); }}
