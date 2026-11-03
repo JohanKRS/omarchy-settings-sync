@@ -30,6 +30,7 @@ def palette(directory=None):
         "urgent": color(colors.get("red", colors.get("color1")), "#a55555"),
         "good": color(colors.get("green", colors.get("color2")), "#7fae7f"),
         "warning": color(colors.get("yellow", colors.get("color3")), "#c9a554"),
+        "release": color(colors.get("magenta", colors.get("color5")), "#b48ead"),
         "font": shell.get("font", {}),
         "controls": shell.get("controls", shell.get("style", {})),
         "spacing": shell.get("spacing", {}),
@@ -58,7 +59,7 @@ class Theme:
             return True
         self.previous = values
         fg, bg, accent = values["foreground"], values["background"], values["accent"]
-        good, warning, urgent = values["good"], values["warning"], values["urgent"]
+        good, warning, urgent, release = values["good"], values["warning"], values["urgent"], values["release"]
         fonts, controls = values["font"], values["controls"]
         size = max(1, int(fonts.get("body", fonts.get("base-size", 12))))
         title = max(1, int(fonts.get("title", round(size * 1.167))))
@@ -156,6 +157,11 @@ class Theme:
             .feature-chevron {{ color: alpha({fg}, .45); margin-top: 2px; }}
             .feature-group-row {{ margin: 18px 6px 4px; }}
             .feature-group-icon {{ opacity: .8; }}
+            .feature-row.release-affected {{ box-shadow: inset 2px 0 {release}; }}
+            .release-label {{ color: {release}; font-size: {max(1, size - 1)}px; }}
+            .features-notice.release-notice {{ border-left-color: {release}; background: alpha({release}, .08); }}
+            .release-diff {{ font-family: monospace; font-size: {max(1, size - 2)}px; color: alpha({fg}, .75);
+                             background: alpha({fg}, .04); padding: 6px 8px; }}
             .program-row {{ padding: 8px 6px; }}
             .program-install {{ color: alpha({good}, .85); }}
             .program-remove {{ color: alpha({urgent}, .85); }}

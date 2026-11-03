@@ -63,6 +63,10 @@ reinstall, the tab asks which machine this installation is: bring back its
 earlier choices, or start it fresh. A new or fresh machine installs nothing
 until you pick which customizations to turn on.
 
+After an Omarchy update, customizations whose Omarchy defaults changed are
+highlighted with what changed and quick actions: keep yours, use the new
+default, or adjust with the agent.
+
 Repositories created before the catalog keep the agent-led Sync. Use
 **Customizations → Create catalog** to convert one.
 

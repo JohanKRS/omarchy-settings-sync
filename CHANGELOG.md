@@ -14,6 +14,10 @@
   hands judgment steps and conflicts with local edits to the agent.
 - Turning a customization off returns it to the Omarchy default, keeps it as
   it is, or restores the earlier backup. Optional parts have their own switch.
+- After an Omarchy update, mark the customizations whose Omarchy defaults
+  changed, comparing with the previous package in pacman's cache. Show the
+  changed values and files, with Keep mine, Use the new default and Adjust with
+  the agent, and a Changed by Omarchy filter.
 - **Remove from repository** undoes a customization here and asks the agent to
   delete it from the repository; other machines undo it on their next Sync from
   their own record, even after its files are gone.

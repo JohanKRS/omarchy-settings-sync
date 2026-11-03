@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 import platform
+import subprocess
 import time
 from pathlib import Path
 
@@ -12,14 +13,15 @@ from gi.repository import Gdk, GLib, Gtk, Pango
 from applier import Applier, Ledger, delegation, orphans, status
 import checkout
 from context import repository_state
-from core import private_write
+from core import private_write, read_json
+import release
 from features import (GROUPS, Probe, dependents, desired, has_catalog, install_id, list_machines, load_catalog,
                       load_machine, machine_name, machine_path, machine_text, off_mode, ordered, part_enabled,
                       remove_machine, rename_machine, valid_machine)
 from i18n import tr
 
-FILTERS = ("all", "on", "off", "new", "pending", "modified", "unavailable")
-FILTER_LABELS = {"all": "All", "on": "On", "off": "Off", "new": "New", "pending": "Pending",
+FILTERS = ("all", "on", "off", "new", "pending", "modified", "release", "unavailable")
+FILTER_LABELS = {"all": "All", "on": "On", "off": "Off", "new": "New", "pending": "Pending", "release": "Changed by Omarchy",
                  "modified": "Edited locally", "unavailable": "Not applicable"}
 STATUS_LABELS = {"applied": "Applied", "pending": "Pending", "modified": "Edited locally", "off": "Off",
                  "new": "New", "unavailable": "Not applicable"}
@@ -27,6 +29,14 @@ GROUP_LABELS = {"desktop": "Desktop", "apps": "Apps", "system": "System", "progr
 AREA_LABELS = {"hyprland": "Hyprland", "firefox": "Firefox", "shell": "Shell", "voxtype": "Voxtype", "mime": "MIME",
                "gtk": "GTK", "nautilus": "Nautilus", "steam": "Steam", "whatsapp": "WhatsApp", "papers": "Papers",
                "tensaku": "Tensaku", "keystroke": "Keystroke", "claude": "Claude", "sddm": "SDDM"}
+RELEASE_LABELS = {"broken": "Error after Omarchy {version}", "default-changed": "Omarchy {version} changed this default",
+                  "changed": "Omarchy {version} changed related files", "redundant": "Omarchy {version} now does this by default"}
+RELEASE_HELP = {
+    "broken": "Hyprland reports configuration errors since the update. Adjust it with the agent.",
+    "default-changed": "Omarchy changed the default value of something this customization sets. Yours still wins.",
+    "changed": "Omarchy changed files near what this customization edits. Check that it still behaves as you expect.",
+    "redundant": "Omarchy's new default matches this customization, so you could turn it off.",
+}
 APP_ICONS = {"nautilus": "org.gnome.Nautilus", "papers": "org.gnome.Papers", "hyprland": "preferences-desktop-display-symbolic",
              "shell": "preferences-desktop-symbolic", "system": "preferences-system-symbolic",
              "programs": "package-x-generic-symbolic"}
@@ -65,6 +75,13 @@ class Snapshot:
     machines: list = field(default_factory=list)
     binding_needed: bool = False
     orphans: list = field(default_factory=list)
+    release: dict = field(default_factory=dict)
+
+    def impact(self, feature_id):
+        """What the latest Omarchy update changed for a feature, unless already reviewed."""
+        if feature_id in self.release.get("dismissed", []):
+            return None
+        return self.release.get("impacts", {}).get(feature_id)
 
     @property
     def catalog(self):
@@ -124,7 +141,52 @@ def collect(window, *, fetch=False):
         snapshot.states[feature.id] = states
         snapshot.labels[feature.id] = status(feature, choice, off_mode(feature, snapshot.machine),
                                              snapshot.ledger, states, failing)
+    snapshot.release = release_review(window, snapshot, probe.omarchy())
     return snapshot
+
+
+def defaults_snapshot(window, version):
+    return state_dir(window) / "omarchy-defaults" / version
+
+
+def release_review(window, snapshot, version):
+    """Compare the Omarchy defaults customizations depend on with the version last reviewed here."""
+    if not version or not snapshot.features:
+        return {}
+    ledger = snapshot.ledger
+    seen = ledger.data.get("omarchy", {}).get("version")
+    if not seen:
+        mark_reviewed(window, snapshot, version)
+        return {}
+    if seen == version:
+        return {}
+    path = state_dir(window) / "release-review.json"
+    cached = read_json(path, {})
+    if (cached.get("from"), cached.get("to")) != (seen, version):
+        previous = release.Package(seen, snapshot=defaults_snapshot(window, seen))
+        errors = ""
+        try:
+            result = subprocess.run(["hyprctl", "configerrors"], capture_output=True, text=True, timeout=10)
+            errors = result.stdout.strip() if result.returncode == 0 else ""
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        impacts = release.review(snapshot.features, previous, config_errors=errors) if previous.available else {}
+        cached = {"from": seen, "to": version, "impacts": impacts, "dismissed": [],
+                  "unavailable": not previous.available}
+        private_write(path, cached)
+    if not cached["impacts"]:
+        mark_reviewed(window, snapshot, version)
+        return {}
+    return cached
+
+
+def mark_reviewed(window, snapshot, version):
+    """Remember this version and its relevant defaults for the next update."""
+    snapshot.ledger.data["omarchy"] = {"version": version, "reviewed": GLib.DateTime.new_now_utc().format_iso8601()}
+    snapshot.ledger.save()
+    release.save_snapshot(snapshot.features, defaults_snapshot(window, version))
+    (state_dir(window) / "release-review.json").unlink(missing_ok=True)
+    snapshot.release = {}
 
 
 def changes_for_sync(snapshot):
@@ -226,6 +288,23 @@ class FeaturesPage(Gtk.Box):
         turn_on.connect("clicked", lambda *_: self.decide_new("on"))
         self.undecided.append(turn_on)
         main.append(self.undecided)
+        self.release_notice = Gtk.Box(spacing=4, visible=False)
+        self.release_notice.add_css_class("features-notice")
+        self.release_notice.add_css_class("release-notice")
+        self.release_text = Gtk.Label(xalign=0, hexpand=True, wrap=True)
+        self.release_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.release_notice.append(self.release_text)
+        show = Gtk.Button(label=tr('Show'), valign=Gtk.Align.CENTER)
+        show.add_css_class("flat")
+        show.add_css_class("link-action")
+        show.connect("clicked", lambda *_: self.filter.set_selected(FILTERS.index("release")))
+        self.release_notice.append(show)
+        reviewed = Gtk.Button(label=tr('Mark as reviewed'), valign=Gtk.Align.CENTER)
+        reviewed.add_css_class("flat")
+        reviewed.add_css_class("link-action")
+        reviewed.connect("clicked", lambda *_: self.release_reviewed())
+        self.release_notice.append(reviewed)
+        main.append(self.release_notice)
         self.listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.listing.set_margin_end(10)  # Keep text clear of the overlay scrollbar.
         scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
@@ -354,6 +433,11 @@ class FeaturesPage(Gtk.Box):
         fresh = bool(applicable) and all(snapshot.labels.get(f.id) == "new" for f in applicable)
         self.undecided.set_visible(fresh and not self.staged and not snapshot.binding_needed)
         self.undecided_text.set_text(tr('New machine: choose what to install'))
+        affected = [f for f in snapshot.features if snapshot.impact(f.id)]
+        self.release_notice.set_visible(bool(affected))
+        if affected:
+            self.release_text.set_text(tr('Omarchy {old} → {new}: {count} affected', old=snapshot.release["from"],
+                                          new=snapshot.release["to"], count=len(affected)))
         query = self.search.get_text().casefold().strip()
         wanted = FILTERS[self.filter.get_selected()] if self.filter.get_selected() < len(FILTERS) else "all"
         groups = {}
@@ -366,7 +450,9 @@ class FeaturesPage(Gtk.Box):
             on = self.effective(feature) == "on"
             if wanted == "on" and not on or wanted == "off" and on:
                 continue
-            if wanted not in ("all", "on", "off") and label != wanted:
+            if wanted == "release" and not snapshot.impact(feature.id):
+                continue
+            if wanted not in ("all", "on", "off", "release") and label != wanted:
                 continue
             groups.setdefault(group_key(feature), []).append(feature)
         # Programs first, then one group per app, and system-wide settings last.
@@ -426,6 +512,12 @@ class FeaturesPage(Gtk.Box):
             details.append(tr('this machine only'))
         if label == "unavailable":
             details = [tr('Not applicable here: {condition}', condition=snapshot.failing[feature.id])]
+        impact = snapshot.impact(feature.id)
+        if impact:
+            frame.add_css_class("release-affected")
+            changed = Gtk.Label(label=tr(RELEASE_LABELS[impact["kind"]], version=snapshot.release["to"]), xalign=0, wrap=True)
+            changed.add_css_class("release-label")
+            texts.append(changed)
         if details:
             subtitle = Gtk.Label(label=" · ".join(details), xalign=0, wrap=True)
             subtitle.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
@@ -488,6 +580,75 @@ class FeaturesPage(Gtk.Box):
         frame.append(switch)
         return frame
 
+    def release_details(self, feature, impact):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        title = Gtk.Label(label=tr('Changed in Omarchy {version}', version=self.snapshot.release["to"]).upper(), xalign=0)
+        title.add_css_class("feature-section")
+        title.add_css_class("release-label")
+        box.append(title)
+        explain = Gtk.Label(label=tr(RELEASE_HELP[impact["kind"]]), xalign=0, wrap=True)
+        explain.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        explain.add_css_class("feature-subtitle")
+        box.append(explain)
+        for key in impact.get("keys", []):
+            shown = {name: "—" if key[name] is None else key[name] for name in ("before", "after", "mine")}
+            line = Gtk.Label(label=tr('{key}: default {before} → {after} · yours {mine}', key=key["key"], **shown),
+                             xalign=0, wrap=True)
+            line.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            box.append(line)
+        if impact.get("diff"):
+            lines = impact["diff"].splitlines()
+            diff = Gtk.Label(label="\n".join(lines[:14]) + ("\n…" if len(lines) > 14 else ""), xalign=0,
+                             selectable=True, wrap=True)
+            diff.set_wrap_mode(Pango.WrapMode.CHAR)
+            diff.add_css_class("release-diff")
+            diff.set_tooltip_text(", ".join(impact["files"]))
+            box.append(diff)
+        actions = Gtk.Box(spacing=4)
+        keep = Gtk.Button(label=tr('Keep mine'))
+        keep.connect("clicked", lambda *_: self.dismiss_impact(feature))
+        actions.append(keep)
+        if impact["kind"] in ("redundant", "default-changed") and self.effective(feature) == "on":
+            adopt = Gtk.Button(label=tr('Use the new default'))
+            adopt.connect("clicked", lambda *_: self.adopt_default(feature))
+            actions.append(adopt)
+        adjust = Gtk.Button(label=tr('Adjust with the agent'))
+        adjust.connect("clicked", lambda *_: self.window.adjust_after_release(self.snapshot, feature, impact))
+        actions.append(adjust)
+        for button in _walk(actions):
+            if isinstance(button, Gtk.Button):
+                button.add_css_class("flat")
+                button.add_css_class("link-action")
+                button.set_sensitive(not self.window.busy)
+                self.controls.append(button)
+        box.append(actions)
+        return box
+
+    def save_review(self):
+        private_write(state_dir(self.window) / "release-review.json", self.snapshot.release)
+
+    def dismiss_impact(self, feature):
+        release_state = self.snapshot.release
+        release_state.setdefault("dismissed", []).append(feature.id)
+        if not any(self.snapshot.impact(f.id) for f in self.snapshot.features):
+            self.release_reviewed()
+            return
+        self.save_review()
+        self.render()
+
+    def adopt_default(self, feature):
+        """Turn the customization off with 'return to the Omarchy default', staged like any other change."""
+        self.stage(feature, state="off", mode="default")
+        self.dismiss_impact(feature)
+
+    def release_reviewed(self):
+        version = self.snapshot.release.get("to")
+        if version:
+            mark_reviewed(self.window, self.snapshot, version)
+        if FILTERS[self.filter.get_selected()] == "release":
+            self.filter.set_selected(0)
+        self.render()
+
     def status_widget(self, label):
         text = tr('Changed') if label == "staged" else tr(STATUS_LABELS[label])
         if label == "new":
@@ -513,6 +674,9 @@ class FeaturesPage(Gtk.Box):
             summary.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             summary.add_css_class("feature-subtitle")
             content.append(summary)
+        impact = snapshot.impact(feature.id)
+        if impact:
+            content.append(self.release_details(feature, impact))
         parts = Gtk.Label(label=tr('Parts'), xalign=0)
         parts.add_css_class("feature-section")
         content.append(parts)

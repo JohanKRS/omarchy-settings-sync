@@ -181,6 +181,10 @@ simple parts itself and sends you only what needs judgment or a conflict.
   REPOSITÓRIO" authorizes deleting that feature everywhere: its catalog entry,
   source files used only by it, its documentation and machine entries. The
   plugin already undid it locally and undoes it on other machines at Sync.
+- **After an Omarchy update.** A request titled "AJUSTAR APÓS ATUALIZAÇÃO DO
+  OMARCHY" includes the changed defaults for one customization. Explain briefly
+  what changed, adapt the customization only as much as needed, validate, and
+  update the catalog when the adaptation is portable.
 - **Sync with a catalog** is run by the plugin. You are called only for the
   parts it could not finish. Without a catalog, follow the Sync section above.
 

@@ -138,6 +138,19 @@ default, and asks the agent to delete its catalog entry, its source files, its
 documentation and its machine entries, then publish. Every other machine
 undoes it on its next Sync, using its own record of what was applied.
 
+### After an Omarchy update
+
+The panel remembers which Omarchy version each machine last reviewed. When the
+version changes, it compares the defaults in `/usr/share/omarchy` that each
+customization depends on with the previous version, read from pacman's package
+cache or from a copy saved at the last review. Affected customizations are
+marked in the list, with a **Changed by Omarchy** filter. Their details show
+the changed default values and files, and offer **Keep mine**, **Use the new
+default** (turn it off and return to Omarchy's default) or **Adjust with the
+agent**, which opens the conversation with the differences attached. A
+customization whose value Omarchy now uses by default is marked as one you can
+turn off; Hyprland configuration errors after the update are flagged too.
+
 Validate a catalog with `python3 plugin/features.py validate <repository>`.
 Customizations saved with **Push changes** disabled go to a local catalog on
 that machine and are marked **this machine only**.

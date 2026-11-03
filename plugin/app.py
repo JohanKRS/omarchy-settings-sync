@@ -36,6 +36,7 @@ from chat_view import ChatView
 from message_view import MessageBody
 from activity_indicator import ActivityIndicator
 from applier import delegation, removal
+from release import agent_request as release_request
 import checkout
 from features import machine_name
 from features_view import (FeaturesPage, changes_for_sync, collect, local_catalog, make_applier, results_path,
@@ -1337,6 +1338,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
                         features_task=removal(feature, outcome, results_path(self), machine=snapshot.machine_name,
                                               local_catalog=local_catalog(self)))
         self.worker(work, done)
+
+    def adjust_after_release(self, snapshot, feature, impact):
+        self.show_page("chat")
+        self.submit(tr('Adjust “{title}” after the Omarchy update', title=feature.title),
+                    features_task=release_request(feature, impact, snapshot.release["from"], snapshot.release["to"]))
 
     def migrate_catalog(self):
         self.show_page("chat")
