@@ -2150,16 +2150,31 @@ class SettingsWindow(Gtk.ApplicationWindow):
         content.set_margin_end(10)  # Keep fields clear of the overlay scrollbar.
         dialog.set_content(content)
         groups = {}
-        def section(text, first=False):
-            heading = label(text.upper(), "feature-group")
-            heading.set_selectable(False)
-            heading.add_css_class("settings-heading")
+        def section(text, value="", first=False):
+            # Like Omarchy's own panels: an uppercase heading with its value on the
+            # right, and a divider between sections rather than between every row.
+            block = box(spacing=0)
+            block.add_css_class("settings-section")
             if first:
-                heading.add_css_class("first")
-            content.append(heading)
+                block.add_css_class("first")
+            heading = box(False, 8)
+            heading.add_css_class("settings-heading")
+            name = label(text.upper(), "feature-group")
+            name.set_selectable(False)
+            name.set_wrap(False)
+            name.set_hexpand(True)
+            heading.append(name)
+            if value:
+                shown = label(value.upper(), "settings-value")
+                shown.set_selectable(False)
+                shown.set_wrap(False)
+                shown.set_xalign(1)
+                heading.append(shown)
+            block.append(heading)
             group = box(spacing=0)
             group.add_css_class("settings-group")
-            content.append(group)
+            block.append(group)
+            content.append(block)
             groups["current"] = group
         def item(*widgets, spacing=6):
             row = box(spacing=spacing)
@@ -2174,7 +2189,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
             button.add_css_class("link-action")
             button.add_css_class("inline-link")
             return button
-        section(tr('Repository'), first=True)
+        configured = self.settings.get("repository", "").rstrip("/").removesuffix(".git")
+        section(tr('Repository'), configured.rsplit("/", 1)[-1].rsplit(":", 1)[-1] if configured else "", first=True)
         repository = Gtk.Entry(placeholder_text=tr('owner/dotfiles'))
         repository.set_text(self.settings.get("repository", ""))
         item(self.control(tr('Repository for saving your settings'), repository))
@@ -2222,7 +2238,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         buttons.append(existing)
         buttons.append(create)
         item(buttons, error_label)
-        section(tr('Agent'))
+        section(tr('Agent'), AGENTS[self.agent()])
         if self.model_info.get_parent():
             self.model_info.get_parent().remove(self.model_info)
         item(self.model_info)
@@ -2242,9 +2258,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         item(hint, review, spacing=2)
         version = RUNNING_VERSION
         if version:
-            section(tr('About'))
+            section(tr('About'), 'v' + version)
             version_row = box(False, 8)
-            footer = label('Omarchy Settings Sync v' + version, None, selectable=True)
+            footer = label('Omarchy Settings Sync', None, selectable=True)
             footer.set_wrap(False)
             footer.set_hexpand(True)
             version_row.append(footer)

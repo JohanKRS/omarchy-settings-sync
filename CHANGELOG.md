@@ -5,8 +5,9 @@
 - Open links, such as GitHub in Settings and links in the conversation, with
   the desktop's browser. The panel hides first, because as a full-screen
   overlay it covered the browser and GTK's portal request had no window.
-- Organize Settings into Repository, Agent, Existing customizations and About
-  sections, with dividers between items; the About row names the version.
+- Organize Settings like Omarchy's own panels: uppercase Repository, Agent,
+  Existing customizations and About headings with their value on the right
+  (repository, agent, version) and dividers between sections.
 - Align the header icon's toggle knob with the center of the title's capital O.
 
 ## 0.2.1 — 2026-11-03
