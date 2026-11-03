@@ -41,7 +41,7 @@ Examples use synthetic data.
    enable **Push changes** when you want the agent to update that repository.
 3. **On another Omarchy installation**, install the plugin, authenticate your
    chosen agent and Git account, and select the same repository and branch.
-4. Click **Sync**. The agent compares the repository with that installation,
+4. Open **Customizations** and click **Sync**. The agent compares the repository with that installation,
    preserves local changes, adapts hardware-specific settings, and applies and
    tests compatible components. Repeat Sync when you want to receive updates.
 
@@ -109,8 +109,8 @@ URL. An empty branch uses the repository's default branch. See the
 | --- | --- |
 | Settings icon, left click | Open or hide the panel; reveal a pending question |
 | Settings icon, right click | No action |
-| **Sync** | Apply the repository's customizations that are on for this machine; without a catalog, ask the agent to sync |
 | **Conversation / Customizations** tabs | Talk to the agent, or switch individual customizations on and off for this machine |
+| **Sync**, at the bottom of Customizations | Apply repository updates to what is on for this machine; without a catalog, ask the agent to sync |
 | Message field | Request a specific change; optionally publish its reusable configuration |
 | **Enter / Send / Queue** | The same button sends when idle and queues while an agent is working |
 | Queue above the message field | Compact one-line previews with **Direct now / Send now**, **Edit** and **Remove** icons; pause/resume beside the count |

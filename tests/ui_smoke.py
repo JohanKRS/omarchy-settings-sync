@@ -809,20 +809,23 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             '[[feature.part]]\nkind = "agent"\ntitle = "Idle"\ninstructions = "Do it"\n')
         subprocess.run(["git", "init", "-q", str(checkout_dir)], check=True)
         subprocess.run(["git", "-C", str(checkout_dir), "remote", "add", "origin", window.settings["repository"]], check=True)
-        window.show_page("features")
         page = window.features_page
+        page.fetched = time.monotonic()  # The fixture's remote is fictional; never fetch it.
+        assert window.sync_button is page.sync_button, "Sync lives in the Customizations tab"
+        window.show_page("features")
         wait(lambda: page.snapshot is not None and page.snapshot.features)
         # No machine file yet: a new installation applies nothing until chosen.
         assert page.snapshot.labels == {"lock": "new", "idle": "new"}, page.snapshot.labels
         switches = [w for w in widgets(page.listing) if isinstance(w, Gtk.Switch)]
         assert [s.get_active() for s in switches] == [False, False]
         switches[1].set_active(True)
-        wait(lambda: page.bar.get_visible())
+        wait(lambda: page.apply_button.get_visible())
+        assert not page.sync_button.get_visible()
         page.discard()
-        assert not page.bar.get_visible() and not page.staged
+        assert not page.staged and page.sync_button.get_visible() and not page.apply_button.get_visible()
         idle = next(f for f in page.snapshot.features if f.id == "idle")
         page.toggled(idle, True)
-        wait(lambda: page.bar.get_visible())
+        wait(lambda: page.apply_button.get_visible())
         def fake_run(win, snapshot, changes):
             return [Outcome(feature, action, mode, delegated=[{"part": feature.parts[0], "action": action, "reason": "needs the agent"}])
                     for feature, action, mode in changes]
@@ -865,7 +868,7 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert set(page.snapshot.labels.values()) == {"new"}, page.snapshot.labels
         assert page.undecided.get_visible()
         page.decide_new("on")
-        assert {e["state"] for e in page.staged.values()} == {"on"} and page.bar.get_visible()
+        assert {e["state"] for e in page.staged.values()} == {"on"} and page.apply_button.get_visible()
         page.discard()
         page.show_machines()
         page.machine_action(content, "use", "work-laptop")

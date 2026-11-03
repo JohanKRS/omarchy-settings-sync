@@ -274,13 +274,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.new_button.connect("clicked", lambda *_: self.new_chat())
         header.append(self.new_button)
         header.append(settings_button)
-        sync_content = box(False, 6)
-        sync_content.append(Gtk.Image.new_from_icon_name("view-refresh-symbolic"))
-        sync_content.append(Gtk.Label(label="Sync"))
-        self.sync_button = Gtk.Button(child=sync_content, tooltip_text=tr('Sync'))
-        self.sync_button.add_css_class("flat")
-        self.sync_button.connect("clicked", lambda *_: self.sync())
-        header.append(self.sync_button)
         self.popup_card.append(header)
         tabs = box(False, 0)
         tabs.add_css_class("view-tabs")
@@ -297,6 +290,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.pages.add_named(outer, "chat")
         self.features_page = FeaturesPage(self)
         self.pages.add_named(self.features_page, "features")
+        self.sync_button = self.features_page.sync_button  # Sync lives in the Customizations tab.
         self.features_pending = False
         self.main_content = self.pages
         self.overlay = Gtk.Overlay(child=self.pages)
@@ -806,6 +800,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return mode if mode in CLAUDE_PERMISSION_MODES else 'default'
         return self.settings.get('permissions', 'auto')
 
+    def sync_available(self):
+        return (not self.busy and not self.terminal_pid and not self.delivery_pending
+                and not self.image_pastes and not self.panels)
+
     def update_buttons(self):
         available = not self.busy and not self.terminal_pid and not self.delivery_pending and not self.image_pastes
         installed = bool(self.executables[self.agent()])
@@ -814,7 +812,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.send_button.set_sensitive(installed and not self.image_pastes)
         self.send_button.set_tooltip_text(tr('Enter: queue. Ctrl+Enter: send now. Shift+Enter: new line.')
                                          if running else tr('Enter: send. Shift+Enter: new line.'))
-        self.sync_button.set_sensitive(available and installed and not self.panels)
         self.terminal_button.set_sensitive(True)
         self.new_button.set_sensitive(available and not self.panels)
         self.history_button.set_sensitive(not self.panels)

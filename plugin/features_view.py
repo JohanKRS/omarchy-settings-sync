@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 import platform
+import time
 from pathlib import Path
 
 from gi.repository import GLib, Gtk, Pango
@@ -207,14 +209,23 @@ class FeaturesPage(Gtk.Box):
         scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroll.set_child(self.listing)
         main.append(scroll)
+        # The tab's action bar: Sync when nothing is staged, Apply when it is.
         self.bar = Gtk.Box(spacing=8, visible=False)
         self.bar.add_css_class("pending-bar")
         self.bar_text = Gtk.Label(xalign=0, wrap=True, hexpand=True)
         self.bar_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self.bar.append(self.bar_text)
+        sync = Gtk.Box(spacing=6)
+        sync.append(Gtk.Image.new_from_icon_name("view-refresh-symbolic"))
+        sync.append(Gtk.Label(label=tr('Sync')))
+        self.sync_button = Gtk.Button(child=sync, valign=Gtk.Align.CENTER, tooltip_text=tr(
+            'Apply repository updates to the customizations that are on for this machine'))
+        self.sync_button.connect("clicked", lambda *_: self.window.sync())
+        self.bar.append(self.sync_button)
         discard = Gtk.Button(label=tr('Discard'), valign=Gtk.Align.CENTER)
         discard.add_css_class("flat")
         discard.connect("clicked", lambda *_: self.discard())
+        self.discard_button = discard
         self.bar.append(discard)
         self.apply_button = Gtk.Button(label=tr('Apply'), valign=Gtk.Align.CENTER)
         self.apply_button.add_css_class("suggested-action")
@@ -243,15 +254,20 @@ class FeaturesPage(Gtk.Box):
         self.banner_mode = None
         self.controls = []
         self.removing = None
+        self.fetched = 0
 
     def sync_sensitivity(self):
         for widget in self.controls:
             widget.set_sensitive(not self.window.busy)
-        if self.bar.get_visible():
-            self.apply_button.set_sensitive(not self.window.busy and not self.loading)
+        self.update_bar()
 
     # Data ------------------------------------------------------------------
-    def refresh(self, fetch=False):
+    def refresh(self, fetch=None):
+        if fetch is None:
+            # Opening the tab shows the latest list without applying anything.
+            fetch = not self.window.busy and time.monotonic() - self.fetched > 60
+        if fetch:
+            self.fetched = time.monotonic()
         if self.loading or not self.window.settings.get("repository"):
             if not self.window.settings.get("repository"):
                 self.show_banner(tr('Choose a configuration repository in Settings.'), None)
@@ -581,10 +597,30 @@ class FeaturesPage(Gtk.Box):
         self.render()
 
     def update_bar(self):
-        if not self.staged or not self.snapshot:
+        snapshot = self.snapshot
+        idle = self.window.sync_available() and not self.loading
+        self.sync_button.set_sensitive(idle)
+        self.apply_button.set_sensitive(idle)
+        if not snapshot:
             self.bar.set_visible(False)
             return
-        by_id = {f.id: f for f in self.snapshot.features}
+        staged = bool(self.staged)
+        self.sync_button.set_visible(not staged)
+        self.discard_button.set_visible(staged)
+        self.apply_button.set_visible(staged)
+        self.bar.set_visible(True)
+        if staged:
+            self.bar_text.remove_css_class("feature-subtitle")
+        else:
+            self.bar_text.add_css_class("feature-subtitle")
+            self.bar_text.set_text(self.sync_summary())
+            waiting = self.updates()
+            if waiting:
+                self.sync_button.add_css_class("suggested-action")
+            else:
+                self.sync_button.remove_css_class("suggested-action")
+            return
+        by_id = {f.id: f for f in snapshot.features}
         ons = [i for i, e in self.staged.items() if e.get("state") == "on"]
         offs = [i for i, e in self.staged.items() if e.get("state") == "off"]
         other = [i for i, e in self.staged.items() if "state" not in e]
@@ -601,8 +637,27 @@ class FeaturesPage(Gtk.Box):
         if any(f.needs_agent for f in touched):
             parts.append(tr('uses the agent'))
         self.bar_text.set_text(" · ".join(parts))
-        self.apply_button.set_sensitive(not self.window.busy and not self.loading)
-        self.bar.set_visible(True)
+
+    def updates(self):
+        snapshot = self.snapshot
+        if not snapshot or not snapshot.catalog:
+            return 0
+        return sum(snapshot.labels.get(f.id) == "pending" for f in snapshot.features) + len(snapshot.orphans)
+
+    def sync_summary(self):
+        snapshot = self.snapshot
+        if not snapshot.catalog:
+            return tr('Without a catalog, Sync asks the agent.')
+        count = self.updates()
+        if count:
+            return tr('{count} updates to apply', count=count)
+        when = snapshot.ledger.data.get("updated") if snapshot.ledger else None
+        try:
+            moment = datetime.fromisoformat(when).astimezone()
+        except (TypeError, ValueError):
+            return tr('Up to date')
+        stamp = moment.strftime('%H:%M') if moment.date() == datetime.now().date() else moment.strftime('%d/%m %H:%M')
+        return tr('Up to date · synced {time}', time=stamp)
 
     def apply(self):
         if not self.staged or self.window.busy or not self.snapshot:

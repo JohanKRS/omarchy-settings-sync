@@ -16,6 +16,9 @@
 - **Remove from repository** undoes a customization here and asks the agent to
   delete it from the repository; other machines undo it on their next Sync from
   their own record, even after its files are gone.
+- Move **Sync** from the header to the bottom of the Customizations tab, which
+  shows how many updates are waiting. Opening the tab fetches the repository so
+  the list is current, without applying anything.
 - With a catalog, **Sync** applies what is on for this machine without
   starting the agent unless needed. Repositories without a catalog keep the
   agent-led Sync; **Create catalog** asks the agent to convert them.

@@ -249,5 +249,10 @@
   "When turned off on this machine": "Al desactivar en esta máquina",
   "Nothing is installed until you turn customizations on and apply.": "No se instala nada hasta que actives las personalizaciones y apliques.",
   "New machine": "Nueva máquina",
-  "New machine: choose what to install": "Máquina nueva: elige qué instalar"
+  "New machine: choose what to install": "Máquina nueva: elige qué instalar",
+  "Apply repository updates to the customizations that are on for this machine": "Aplica las actualizaciones del repositorio a las personalizaciones activadas en esta máquina",
+  "Without a catalog, Sync asks the agent.": "Sin catálogo, la sincronización la hace el agente.",
+  "{count} updates to apply": "{count} actualizaciones para aplicar",
+  "Up to date": "Al día",
+  "Up to date · synced {time}": "Al día · sincronizado a las {time}"
 }
