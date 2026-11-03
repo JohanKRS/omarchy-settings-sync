@@ -88,27 +88,47 @@ Ui.BarWidget {
   // vector so it follows the bar colour. BarIconButton loads it into its
   // 16 px optical canvas in place of a font glyph.
   //
-  // This is the bar's optical size of plugin/icons/omarchy-settings-sync-symbolic.svg:
-  // the same shape with slightly heavier lines, drawn at 12/16 of the canvas
-  // and lifted 0.9/16 so its size, weight and centre line match the font
-  // glyphs beside it (those sit a little above the canvas centre).
+  // The bar's other icons are hinted font glyphs: their 1 px strokes sit on
+  // whole pixels. This draws plugin/icons/omarchy-settings-sync-symbolic.svg
+  // at 12/16 of the canvas, where its 2-unit strokes are exactly one logical
+  // pixel like theirs, and snaps it to the device pixel grid so the edges
+  // stay as crisp. It is lifted to the glyphs' slightly raised centre line.
   Component {
     id: syncIcon
 
     Item {
       id: syncGlyph
       readonly property color tint: button.active && button.useActiveColor ? button.activeColor : button.foreground
+      readonly property real dpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
       readonly property real drawSize: height * 12 / 16
+
+      function place() {
+        var origin = syncGlyph.mapToItem(null, 0, 0)
+        var left = (width - drawSize) / 2
+        var top = (height - drawSize) / 2 - Math.round(height / 16)
+        syncShape.x = Math.round((origin.x + left) * dpr) / dpr - origin.x
+        syncShape.y = Math.round((origin.y + top) * dpr) / dpr - origin.y
+      }
+
+      onWidthChanged: place()
+      onHeightChanged: place()
+      Component.onCompleted: place()
+
+      Timer {
+        // The bar may still be laying out when the icon first loads.
+        interval: 300
+        running: true
+        onTriggered: syncGlyph.place()
+      }
 
       Shape {
         id: syncShape
         width: 24
         height: 24
-        x: (syncGlyph.width - syncGlyph.drawSize) / 2
-        y: (syncGlyph.height - syncGlyph.drawSize) / 2 - syncGlyph.height * 0.9 / 16
         scale: syncGlyph.drawSize / 24
         transformOrigin: Item.TopLeft
-        preferredRendererType: Shape.CurveRenderer
+        preferredRendererType: Shape.GeometryRenderer
+        antialiasing: true
 
         ShapePath {
           fillColor: syncGlyph.tint
