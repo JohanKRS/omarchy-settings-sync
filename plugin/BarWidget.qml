@@ -84,21 +84,29 @@ Ui.BarWidget {
     }
   }
 
-  // Plugin icon: the square toggle knob inside a sync loop. Same geometry as
-  // plugin/icons/omarchy-settings-sync-symbolic.svg (24-unit grid), drawn as
-  // a vector so it follows the bar colour. BarIconButton loads it into its
+  // Plugin icon: the square toggle knob inside a sync loop, drawn as a
+  // vector so it follows the bar colour. BarIconButton loads it into its
   // 16 px optical canvas in place of a font glyph.
+  //
+  // This is the bar's optical size of plugin/icons/omarchy-settings-sync-symbolic.svg:
+  // the same shape with slightly heavier lines, drawn at 12/16 of the canvas
+  // and lifted 0.9/16 so its size, weight and centre line match the font
+  // glyphs beside it (those sit a little above the canvas centre).
   Component {
     id: syncIcon
 
     Item {
       id: syncGlyph
       readonly property color tint: button.active && button.useActiveColor ? button.activeColor : button.foreground
+      readonly property real drawSize: height * 12 / 16
 
       Shape {
+        id: syncShape
         width: 24
         height: 24
-        scale: syncGlyph.width / 24
+        x: (syncGlyph.width - syncGlyph.drawSize) / 2
+        y: (syncGlyph.height - syncGlyph.drawSize) / 2 - syncGlyph.height * 0.9 / 16
+        scale: syncGlyph.drawSize / 24
         transformOrigin: Item.TopLeft
         preferredRendererType: Shape.CurveRenderer
 
@@ -106,7 +114,7 @@ Ui.BarWidget {
           fillColor: syncGlyph.tint
           strokeColor: "transparent"
           strokeWidth: -1
-          PathSvg { path: "M2 15V5h16.59l-3-3L17 .59 23.41 7H4v8zM22 9v10H5.41l3 3L7 23.41.59 17H20V9zM12 9h6v6h-6z" }
+          PathSvg { path: "M2.25 14.75V4.75h15.23l-2.25-2.25L17 .73l6.52 6.52H4.75v7.5zM21.75 9.25v10H6.52l2.25 2.25L7 23.27.48 16.75h18.77v-7.5zM12 9.25h5.5v5.5H12z" }
         }
       }
 
@@ -114,8 +122,8 @@ Ui.BarWidget {
       // colour, plus a dot just outside its top-right corner.
       Rectangle {
         visible: root.waiting
-        x: syncGlyph.width - 1
-        y: -3
+        x: syncShape.x + syncGlyph.drawSize - 1
+        y: syncShape.y - 2
         width: 4
         height: 4
         radius: 2
