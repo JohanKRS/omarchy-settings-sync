@@ -89,8 +89,8 @@ Ui.BarWidget {
   // 16 px optical canvas in place of a font glyph.
   //
   // This is the bar's optical size of plugin/icons/omarchy-settings-sync-symbolic.svg:
-  // the same shape with slightly heavier lines, drawn at 13/16 of the canvas
-  // and lifted 0.6/16 so its size, weight and centre line match the font
+  // the same shape with slightly heavier lines, drawn at 12/16 of the canvas
+  // and lifted 0.9/16 so its size, weight and centre line match the font
   // glyphs beside it (those sit a little above the canvas centre).
   Component {
     id: syncIcon
@@ -98,14 +98,14 @@ Ui.BarWidget {
     Item {
       id: syncGlyph
       readonly property color tint: button.active && button.useActiveColor ? button.activeColor : button.foreground
-      readonly property real drawSize: height * 13 / 16
+      readonly property real drawSize: height * 12 / 16
 
       Shape {
         id: syncShape
         width: 24
         height: 24
         x: (syncGlyph.width - syncGlyph.drawSize) / 2
-        y: (syncGlyph.height - syncGlyph.drawSize) / 2 - syncGlyph.height * 0.6 / 16
+        y: (syncGlyph.height - syncGlyph.drawSize) / 2 - syncGlyph.height * 0.9 / 16
         scale: syncGlyph.drawSize / 24
         transformOrigin: Item.TopLeft
         preferredRendererType: Shape.CurveRenderer
