@@ -237,14 +237,15 @@ def parse(text, repository, *, local=False, errors=None):
         if len(set(keys)) != len(keys):
             errors.append(f"{identifier}: two parts have the same target; give them ids")
             continue
-        app = str(entry.get("app") or (lists["areas"][0] if lists["areas"] else ""))
+        group = entry.get("group") if entry.get("group") in GROUPS else "apps"
+        # System-wide settings without an app stay together under System.
+        app = str(entry.get("app") or (lists["areas"][0] if lists["areas"] and group != "system" else ""))
         if app and not IDENTIFIER.fullmatch(app):
             errors.append(f"{identifier}: app must be a short lowercase name, such as firefox")
             continue
         features.append(Feature(
             id=identifier, title=str(entry["title"]), summary=str(entry.get("summary", "")),
-            group=entry.get("group") if entry.get("group") in GROUPS else "apps",
-            default=entry.get("default", "on"), parts=parts, local=local, app=app,
+            group=group, default=entry.get("default", "on"), parts=parts, local=local, app=app,
             icon=str(entry.get("icon", "")), **lists))
     for entry in document.get("program", []):
         program = parse_program(entry, errors, local)
@@ -257,8 +258,13 @@ def parse_program(entry, errors, local=False):
     """A program to install or remove on each machine, without a full feature entry."""
     package = str(entry.get("package", ""))
     action = entry.get("action", "install")
-    if not PACKAGE.fullmatch(package):
+    packages = entry.get("packages", [package])
+    identifier = str(entry.get("id") or f"program-{package}")
+    if not PACKAGE.fullmatch(package) or not _strings(packages) or not all(PACKAGE.fullmatch(p) for p in packages):
         errors.append(f"Invalid program package {package!r}")
+        return None
+    if not IDENTIFIER.fullmatch(identifier):
+        errors.append(f"{package}: invalid id {identifier!r}")
         return None
     if action not in ("install", "remove"):
         errors.append(f"{package}: action must be install or remove")
@@ -266,13 +272,14 @@ def parse_program(entry, errors, local=False):
     if entry.get("default", "ask") not in DEFAULTS or not _strings(entry.get("when", [])):
         errors.append(f"{package}: invalid default or when")
         return None
-    if entry.get("aur") and action == "install":
-        # AUR helpers run as the user with their own prompts; the agent installs these.
-        data = {"kind": "agent", "id": "aur", "title": f"AUR: {package}",
-                "instructions": f"Install the AUR package {package} with `omarchy pkg aur add {package}`."}
+    if action == "install" and (entry.get("aur") or entry.get("instructions")):
+        # AUR helpers and direct downloads need the user's prompts and checks; the agent installs these.
+        data = {"kind": "agent", "id": "package", "title": entry.get("title") or package,
+                "instructions": str(entry.get("instructions")
+                                    or f"Install the AUR package {package} with `omarchy pkg aur add {package}`.")}
     else:
-        data = {"kind": "package", ("install" if action == "install" else "remove"): [package]}
-    return Feature(id=f"program-{package}", title=str(entry.get("title") or package),
+        data = {"kind": "package", "id": "packages", ("install" if action == "install" else "remove"): list(packages)}
+    return Feature(id=identifier, title=str(entry.get("title") or package),
                    summary=str(entry.get("summary", "")), group="programs", default=entry.get("default", "ask"),
                    when=list(entry.get("when", [])), parts=[Part(data["kind"], data, 0)], local=local,
                    icon=str(entry.get("icon") or package), program=action)

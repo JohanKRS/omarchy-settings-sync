@@ -151,8 +151,10 @@ simple parts itself and sends you only what needs judgment or a conflict.
   or text) only for profile detection, hardware adaptation, downloads or other
   judgment. Give optional parts an `id` and `optional = true`.
 - **Programs to install or remove** go in the `[[program]]` list, not in a
-  feature: `package`, optional `title`, `action` (`install` or `remove`),
-  `aur = true` for AUR packages, and `default` (usually `ask`). Use a feature
+  feature: `package`, optional `id`, `title`, `packages` (when several packages
+  belong together), `action` (`install` or `remove`), `aur = true` for AUR
+  packages or `instructions` for direct downloads, and `default` (usually
+  `ask`). Use a feature
   with a `package` part only when the package is part of a larger setting.
 - **Keep features independent.** When behaviors share a file, split them: a
   Hyprland module per feature with its own `require` line, a separate block per

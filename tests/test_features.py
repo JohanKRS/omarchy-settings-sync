@@ -181,6 +181,17 @@ package = "artcraft-launcher"
 aur = true
 
 [[program]]
+id = "office-removed"
+package = "libreoffice-fresh"
+packages = ["libreoffice-fresh", "libreoffice-still"]
+action = "remove"
+
+[[program]]
+id = "artcraft"
+package = "artcraft-launcher"
+instructions = "apps/craft-launcher/README.md"
+
+[[program]]
 package = "bad name"
 ''')
         features, errors = load_catalog(self.repo)
@@ -191,9 +202,13 @@ package = "bad name"
         self.assertEqual((papers.program, papers.default, papers.parts[0].data['install']), ('install', 'ask', ['papers']))
         self.assertEqual(by_id['program-libreoffice-fresh'].parts[0].data['remove'], ['libreoffice-fresh'])
         self.assertTrue(by_id['program-artcraft-launcher'].parts[0].agent)
+        self.assertEqual(by_id['office-removed'].parts[0].data['remove'], ['libreoffice-fresh', 'libreoffice-still'])
+        self.assertEqual(by_id['artcraft'].parts[0].data['instructions'], 'apps/craft-launcher/README.md')
+        self.assertEqual(by_id['artcraft'].parts[0].key, 'package')
+        self.assertEqual(by_id['no-sleep'].app, '')  # System-wide settings stay under System.
         self.applier.finish([self.applier.enable(papers, {})])
         self.assertEqual(len([call for call in self.run.calls if call[0] == 'pkexec']), 1)
-        self.assertEqual(self.ledger.part('program-papers', 'package:papers')['installed'], ['papers'])
+        self.assertEqual(self.ledger.part('program-papers', 'packages')['installed'], ['papers'])
 
     def test_catalog_rejects_unsafe_or_incomplete_parts(self):
         bad = [
@@ -306,6 +321,22 @@ package = "bad name"
         data = json.loads(shell.read_text())
         self.assertEqual(data['idle'], {'screensaver': 150, 'lock': 300})
         self.assertEqual(data['bar'], {'position': 'top'})
+
+    def test_round_trip_leaves_omarchy_files_byte_identical(self):
+        shell = self.config('omarchy/shell.json')
+        shell.parent.mkdir(parents=True)
+        original = '{\n  "idle": {\n    "screensaver": 150,\n    "lock": 300\n  },\n  "clock": "HH\\n\\u2014\\nmm"\n}\n'
+        shell.write_text(original)
+        (self.omarchy / 'config/omarchy/shell.json').write_text(original)
+        self.applier.finish([self.applier.enable(self.by_id['idle'], {})])
+        self.assertIn('\\u2014', shell.read_text())
+        self.applier.finish([self.applier.disable(self.by_id['idle'], 'default')])
+        self.assertEqual(shell.read_text(), original)
+        self.applier.finish([self.applier.enable(self.by_id['pdf'], {})])
+        voxtype = self.config('voxtype/config.toml')
+        self.assertTrue(voxtype.exists())
+        self.applier.finish([self.applier.disable(self.by_id['pdf'], 'default')])
+        self.assertFalse(voxtype.exists())  # Created by the plugin and emptied again.
 
     def test_json_keys_can_return_to_the_previous_value(self):
         shell = self.config('omarchy/shell.json')

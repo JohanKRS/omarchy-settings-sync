@@ -486,7 +486,11 @@ class Applier:
                     _assign(data, key, value)
                 else:
                     _remove(data, key)
-            self.write(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+            # Keep the file's own style (Omarchy escapes non-ASCII), so a round trip changes nothing else.
+            original = _read(path) or ""
+            indent = next((len(line) - len(line.lstrip(" ")) for line in original.splitlines()[1:]
+                           if line.startswith(" ")), 2)
+            self.write(path, json.dumps(data, indent=indent, ensure_ascii="\\u" in original) + "\n")
             return
         lines, section = data, self.key_section(part)
         separator = " = " if fmt == "toml" else "="
@@ -588,6 +592,12 @@ class Applier:
                 changes[key] = target
         if changes:
             self.write_keys(part, dest, data, changes)
+        if record.get("created") and part.kind != "json":
+            # A file the plugin created and that now holds only section headers goes away.
+            remaining = [line for line in (_read(dest) or "").splitlines()
+                         if line.strip() and not re.match(r"\s*\[.*\]\s*$", line)]
+            if not remaining:
+                self.unlink(dest)
 
     # User services ---------------------------------------------------------
     def enabled(self, unit):

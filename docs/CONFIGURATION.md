@@ -91,7 +91,21 @@ action = "remove"
 [[program]]
 package = "artcraft-launcher"
 aur = true                   # installed by the agent with omarchy pkg aur add
+
+[[program]]
+id = "office-removed"        # optional; keeps machine choices when converting a feature
+package = "libreoffice-fresh"
+packages = ["libreoffice-fresh", "libreoffice-still"]
+action = "remove"
+
+[[program]]
+package = "ai.storyteller.artcraft-launcher"
+instructions = "apps/craft-launcher/README.md"   # a direct download the agent installs
 ```
+
+Customizations name their `app` (such as `firefox` or `hyprland`); the panel
+groups by it. Settings with `group = "system"` and no app are listed under
+System.
 
 | Part kind | Applied by | Turning off |
 | --- | --- | --- |
