@@ -288,5 +288,7 @@
   "Update automatically": "Atualizar automaticamente",
   "Install new GitHub releases of this plugin when the panel is idle.": "Instala os novos releases deste plugin no GitHub quando o painel estiver ocioso.",
   "Check now": "Verificar agora",
-  "Update now": "Atualizar agora"
+  "Update now": "Atualizar agora",
+  "1 update to apply": "1 atualização para aplicar",
+  "The catalog has 1 problem.": "O catálogo tem 1 problema."
 }

@@ -5,12 +5,12 @@
   "version": "0.2.2",
   "author": "JohanKRS",
   "license": "MIT",
-  "description": "Configure your system and apps, including third-party apps, with your agent. Save changes to your repository and sync across Omarchy machines.",
+  "description": "Change your system and apps by asking your agent, keep every change in your own Git repository, and choose per machine what to sync: one switch per customization.",
   "kinds": ["bar-widget"],
   "entryPoints": {"barWidget": "plugin/BarWidget.qml"},
   "barWidget": {
     "displayName": "Omarchy Settings Sync",
-    "description": "Configure your system and apps with your agent and sync across Omarchy machines",
+    "description": "Customize Omarchy with your agent and switch each change on or off per machine",
     "category": "System",
     "defaultSection": "right",
     "allowMultiple": false

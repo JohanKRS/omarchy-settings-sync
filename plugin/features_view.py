@@ -450,7 +450,9 @@ class FeaturesPage(Gtk.Box):
             self.show_banner(tr('This repository has no customizations catalog yet. The agent can create one from your current settings.'),
                              "migrate", tr('Create catalog'))
         elif snapshot.errors:
-            self.show_banner(tr('The catalog has {count} problems.', count=len(snapshot.errors)), "fix", tr('Fix with the agent'))
+            count = len(snapshot.errors)
+            self.show_banner(tr('The catalog has 1 problem.') if count == 1 else tr('The catalog has {count} problems.', count=count),
+                             "fix", tr('Fix with the agent'))
         elif snapshot.problem:
             self.show_banner(tr('Showing the local copy. {problem}', problem=snapshot.problem), None)
         else:
@@ -909,7 +911,7 @@ class FeaturesPage(Gtk.Box):
             return tr('Without a catalog, Sync asks the agent.')
         count = self.updates()
         if count:
-            return tr('{count} updates to apply', count=count)
+            return tr('1 update to apply') if count == 1 else tr('{count} updates to apply', count=count)
         when = snapshot.ledger.data.get("updated") if snapshot.ledger else None
         try:
             moment = datetime.fromisoformat(when).astimezone()

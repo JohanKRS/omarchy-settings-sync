@@ -35,6 +35,208 @@ def settle():
         time.sleep(.01)
 
 
+CATALOG = """version = 1
+
+[[feature]]
+id = "lock-shortcut"
+title = "Super+L locks the screen"
+summary = "Super+Ctrl+L toggles the workspace layout instead."
+app = "hyprland"
+areas = ["hyprland"]
+[[feature.part]]
+kind = "block"
+dest = "~/.config/hypr/bindings.lua"
+text = "-- lock"
+
+[[feature]]
+id = "window-layout"
+title = "Main apps take two thirds of the screen"
+app = "hyprland"
+areas = ["hyprland"]
+[[feature.part]]
+kind = "line"
+dest = "~/.config/hypr/hyprland.lua"
+text = 'require("hypr.window-layout")'
+
+[[feature]]
+id = "idle-timers"
+title = "Screensaver after 5 minutes, lock after 10"
+app = "shell"
+[[feature.part]]
+kind = "json"
+dest = "~/.config/omarchy/shell.json"
+values = { "idle.screensaver" = 300, "idle.lock" = 600 }
+
+[[feature]]
+id = "firefox-popups"
+title = "Website popups float centered"
+summary = "Passkey and extension popups float on the browser's workspace."
+app = "firefox"
+areas = ["firefox", "hyprland"]
+[[feature.part]]
+kind = "line"
+dest = "~/.config/hypr/hyprland.lua"
+text = 'require("hypr.firefox-popups")'
+[[feature.part]]
+kind = "agent"
+id = "profile"
+optional = true
+title = "Module in the Firefox profile"
+instructions = "Install the profile module."
+
+[[feature]]
+id = "firefox-toolbar"
+title = "Compact bookmarks toolbar"
+app = "firefox"
+[[feature.part]]
+kind = "agent"
+title = "userChrome.css block"
+instructions = "Merge the toolbar block."
+
+[[feature]]
+id = "dictation"
+title = "Hold Menu to dictate"
+app = "voxtype"
+areas = ["voxtype", "hyprland"]
+[[feature.part]]
+kind = "line"
+dest = "~/.config/hypr/bindings.lua"
+text = "-- dictation"
+
+[[feature]]
+id = "no-sleep"
+title = "The computer never suspends"
+group = "system"
+[[feature.part]]
+kind = "line"
+dest = "~/.config/example-no-sleep"
+text = "AllowSuspend=no"
+
+[[program]]
+package = "papers"
+title = "Papers"
+
+[[program]]
+package = "libreoffice-fresh"
+title = "LibreOffice"
+action = "remove"
+icon = "libreoffice-main"
+"""
+
+
+def make_catalog(path):
+    """A synthetic configuration repository for the Customizations screenshots."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / 'features.toml').write_text(CATALOG)
+    (path / 'machines').mkdir(exist_ok=True)
+    for name, host, version, updated in (('desktop', 'desktop', '4.0.6-1', '2026-11-03T18:30:00Z'),
+                                         ('laptop', 'laptop', '4.0.6-1', '2026-10-30T09:12:00Z')):
+        (path / f'machines/{name}.toml').write_text(
+            f'name = "{name}"\nhostname = "{host}"\nomarchy = "{version}"\nupdated = "{updated}"\n\n'
+            '[features]\n"lock-shortcut" = "on"\n"window-layout" = "on"\n"idle-timers" = "on"\n'
+            '"firefox-popups" = "on"\n"firefox-toolbar" = "on"\n"no-sleep" = "off"\n"program-libreoffice-fresh" = "on"\n')
+    subprocess.run(['git', 'init', '-q', str(path)], check=True)
+    subprocess.run(['git', '-C', str(path), 'remote', 'add', 'origin', 'https://github.com/example/dotfiles'], check=True)
+
+
+def capture_customizations(window, region):
+    page = window.features_page
+    page.fetched = time.monotonic()  # The example remote is fictional; never fetch it.
+    window.show_page('features')
+    deadline = time.monotonic() + 10
+    while not (page.snapshot and page.snapshot.features) and time.monotonic() < deadline:
+        settle()
+    snapshot = page.snapshot
+    # Show the states a real machine goes through; destinations here are fictional.
+    snapshot.labels.update({'lock-shortcut': 'applied', 'window-layout': 'applied', 'idle-timers': 'applied',
+                            'firefox-popups': 'applied', 'firefox-toolbar': 'pending', 'dictation': 'new',
+                            'no-sleep': 'off', 'program-papers': 'new', 'program-libreoffice-fresh': 'applied'})
+    page.render()
+    settle()
+    subprocess.run(['grim', '-g', region, str(ROOT / 'docs/customizations.png')], check=True)
+    snapshot.release = {'from': '4.0.6-1', 'to': '4.1.0-1', 'dismissed': [], 'impacts': {'idle-timers': {
+        'kind': 'default-changed', 'files': ['config/omarchy/shell.json'],
+        'diff': '--- config/omarchy/shell.json (before)\n+++ config/omarchy/shell.json (now)\n@@ -2,4 +2,4 @@\n'
+                '   "idle": {\n-    "screensaver": 150,\n-    "lock": 300\n+    "screensaver": 180,\n+    "lock": 360\n   },',
+        'keys': [{'key': 'idle.screensaver', 'before': 150, 'after': 180, 'mine': 300, 'kind': 'default-changed'},
+                 {'key': 'idle.lock', 'before': 300, 'after': 360, 'mine': 600, 'kind': 'default-changed'}],
+        'errors': ''}}}
+    page.expanded.add('idle-timers')
+    page.filter.set_selected(page_filter('release'))
+    settle()
+    subprocess.run(['grim', '-g', region, str(ROOT / 'docs/release-review.png')], check=True)
+    page.expanded.clear()
+    page.filter.set_selected(0)
+    snapshot.release = {}
+    page.show_machines()
+    settle()
+    subprocess.run(['grim', '-g', region, str(ROOT / 'docs/machines.png')], check=True)
+    page.hide_machines()
+    page.render()
+    settle()
+
+
+def page_filter(name):
+    from features_view import FILTERS
+    return FILTERS.index(name)
+
+
+def compose_showcase():
+    """preview.png: the marketplace and README picture, two panels beside a short pitch."""
+    import cairo
+    from theme import palette
+    colors = palette()
+    def rgb(value, alpha=1):
+        value = value.lstrip('#')
+        return tuple(int(value[i:i + 2], 16) / 255 for i in (0, 2, 4)) + (alpha,)
+    width, height = 2400, 1400
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
+    cr = cairo.Context(surface)
+    cr.set_source_rgba(*rgb(colors['background']))
+    cr.paint()
+    def panel(path, x, y, scale, alpha=1.0):
+        image = cairo.ImageSurface.create_from_png(str(path))
+        cr.save()
+        cr.translate(x, y)
+        cr.scale(scale, scale)
+        cr.set_source_surface(image, 0, 0)
+        cr.get_source().set_filter(cairo.FILTER_BEST)
+        cr.paint_with_alpha(alpha)
+        cr.restore()
+        return image.get_width() * scale, image.get_height() * scale
+    panel(ROOT / 'docs/panel.png', 1110, 150, 0.92, 0.55)
+    panel(ROOT / 'docs/customizations.png', 1430, 110, 1.0)
+    family = 'JetBrainsMono Nerd Font'
+    def text(words, x, y, size, color, weight=cairo.FONT_WEIGHT_NORMAL, spacing=0):
+        cr.select_font_face(family, cairo.FONT_SLANT_NORMAL, weight)
+        cr.set_font_size(size)
+        cr.set_source_rgba(*color)
+        cursor = x
+        for letter in words:
+            cr.move_to(cursor, y)
+            cr.show_text(letter)
+            cursor += cr.text_extents(letter).x_advance + spacing
+    fg, accent = rgb(colors['foreground']), rgb(colors['accent'])
+    muted = rgb(colors['foreground'], .62)
+    text('OMARCHY PLUGIN', 140, 250, 28, accent, cairo.FONT_WEIGHT_BOLD, 6)
+    text('Your setup,', 140, 360, 84, fg, cairo.FONT_WEIGHT_BOLD)
+    text('on every machine.', 140, 460, 84, fg, cairo.FONT_WEIGHT_BOLD)
+    text('Ask your agent for a change. Save it to your', 140, 560, 32, muted)
+    text('repository. Switch it on, machine by machine.', 140, 606, 32, muted)
+    points = ('One switch per customization, grouped by app',
+              'Fresh install? Pick exactly what comes back',
+              'Omarchy updated? See what changed in your setup',
+              'Codex, Claude Code and 11 more agents')
+    for index, point in enumerate(points):
+        y = 730 + index * 86
+        cr.set_source_rgba(*accent)
+        cr.rectangle(140, y - 22, 18, 18)
+        cr.fill()
+        text(point, 186, y, 30, fg)
+    text('github.com/JohanKRS/omarchy-settings-sync', 140, 1250, 24, muted)
+    surface.write_to_png(str(ROOT / 'preview.png'))
+
+
 with tempfile.TemporaryDirectory(prefix='omarchy-settings-preview-') as temp:
     env = {key: str(Path(temp) / name) for key, name in (
         ('XDG_CONFIG_HOME', 'config'), ('XDG_STATE_HOME', 'state'), ('XDG_DATA_HOME', 'data'))}
@@ -42,7 +244,9 @@ with tempfile.TemporaryDirectory(prefix='omarchy-settings-preview-') as temp:
         'app.agent_executable', side_effect=lambda agent: sys.executable if agent in {'codex', 'claude'} else None
     ):
         private_write(Path(env['XDG_CONFIG_HOME']) / 'omarchy-agent-settings/settings.json',
-                      {'agent': 'claude', 'repository': 'https://github.com/example/dotfiles', 'publish': True})
+                      {'agent': 'claude', 'repository': 'https://github.com/example/dotfiles', 'publish': True,
+                       'machine': 'desktop'})
+        make_catalog(Path(env['XDG_DATA_HOME']) / 'omarchy-agent-settings/workspace/repository')
         application = Gtk.Application(application_id='org.omarchy.AgentSettings.Preview')
         application.register(None)
         window = SettingsWindow(application)
@@ -62,7 +266,7 @@ with tempfile.TemporaryDirectory(prefix='omarchy-settings-preview-') as temp:
         window.status.set_text('Checking terminal settings…')
         window.update_buttons()
         settle()
-        subprocess.run(['grim', '-g', region, str(ROOT / 'preview.png')], check=True)
+        subprocess.run(['grim', '-g', region, str(ROOT / 'docs/panel.png')], check=True)
         window.busy = False
         window.turn_id = None
         window.new_chat()
@@ -171,8 +375,12 @@ xdg-user-dir DESKTOP
         settle()
         subprocess.run(['grim', '-g', region, str(ROOT / 'docs/history.png')], check=True)
         window.history_panel.destroy()
+        capture_customizations(window, region)
         window.client = None
         GLib.source_remove(window.theme_timer)
         GLib.source_remove(window.attention_timer)
         window.destroy()
-        print('Captured preview.png, docs/settings.png, docs/questions.png, docs/conversation.png, docs/choices.png and docs/history.png; spinner animates after reopening')
+        compose_showcase()
+        print('Captured preview.png, docs/panel.png, docs/settings.png, docs/questions.png, docs/conversation.png, '
+              'docs/choices.png, docs/history.png, docs/customizations.png, docs/machines.png and '
+              'docs/release-review.png; spinner animates after reopening')
