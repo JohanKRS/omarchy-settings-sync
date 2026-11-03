@@ -1,31 +1,55 @@
 # Omarchy Settings Sync
 
-**Configure your system and apps with your agent. Sync your Omarchy machines.**
+**Your Omarchy setup, on every machine.**
 
-Describe a change to the system, an Omarchy app or a third-party app. Your local
-agent configures this machine and, with **Push changes** enabled, saves reusable
-settings in your own Git repository. On another Omarchy machine, select the same repository and click
-**Sync** to apply them. Your configuration repository stays separate from the
-plugin's source code.
+Ask your agent for a change: a shortcut, a window rule, an app's settings, a
+program to install. It applies the change on this machine and saves it to your
+own Git repository. On your other machines, every customization shows up as a
+switch. Turn on what you want there, and **Sync** brings it in.
 
-Already customized your system or apps? **[Settings](docs/settings.png) → Review existing
-customizations** asks the agent to find portable changes and lets you choose
-what to save.
+<p align="center"><img src="preview.png" width="900" alt="The Customizations tab with switches grouped by app, beside a conversation with the agent"></p>
 
-<p align="center"><img src="preview.png" width="560" alt="Agent working on a terminal font request to save and sync across Omarchy machines"></p>
+- **Every customization is a switch.** Customizations are grouped by app, and
+  programs to install or remove have their own list. Turning one off returns it
+  to the Omarchy default, removing exactly what it added and nothing else.
+- **Reinstall without fear.** After a fresh install, pick your machine to get
+  its choices back, or start clean and choose only what you want.
+- **Omarchy updates, explained.** After an update, see which of your
+  customizations Omarchy's new defaults touched. Keep yours, adopt the new
+  default, or let the agent adapt it.
+- **Fast where it can be, smart where it must be.** Files, snippets, keys, MIME
+  defaults, services and packages apply in place, with a single password prompt.
+  The agent steps in only for judgment calls and conflicts with your local edits.
+- **Any agent you already use.** Codex and Claude Code have native conversations
+  with clickable questions; 11 more CLIs run in an embedded terminal.
+- **Yours.** Your configuration lives in your repository. The plugin has no
+  backend, and it updates itself from GitHub releases.
+
+Already customized your system? **Settings → Review existing customizations**
+finds portable changes on this machine and lets you choose what to save. A
+repository from an earlier version can be converted with **Customizations →
+Create catalog**.
 
 <details>
 <summary>More screenshots</summary>
 
 Examples use synthetic data.
 
-| Conversation and queue | Clickable answers |
+| Customizations | After an Omarchy update |
 | --- | --- |
-| [![Conversation and queued follow-ups](docs/conversation.png)](docs/conversation.png) | [![Clickable conversation alternatives](docs/choices.png)](docs/choices.png) |
+| [![Customizations grouped by app with programs, states and switches](docs/customizations.png)](docs/customizations.png) | [![A customization whose Omarchy default changed, with the new values and actions](docs/release-review.png)](docs/release-review.png) |
 
-| Structured questions | Settings |
+| Machines | Conversation and queue |
 | --- | --- |
-| [![Native question with options and free text](docs/questions.png)](docs/questions.png) | [![Settings with optional customization review](docs/settings.png)](docs/settings.png) |
+| [![Machines in the repository, with reuse and start-fresh options](docs/machines.png)](docs/machines.png) | [![Conversation and queued follow-ups](docs/conversation.png)](docs/conversation.png) |
+
+| Clickable answers | Structured questions |
+| --- | --- |
+| [![Clickable conversation alternatives](docs/choices.png)](docs/choices.png) | [![Native question with options and free text](docs/questions.png)](docs/questions.png) |
+
+| Settings | History |
+| --- | --- |
+| [![Settings sections for repository, agent and updates](docs/settings.png)](docs/settings.png) | [![Searchable conversation history](docs/history.png)](docs/history.png) |
 
 </details>
 
