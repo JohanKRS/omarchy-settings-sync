@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 — 2026-11-03
+
+- Align the bar icon with the icons beside it: same size, line weight and
+  center line as the bar's font glyphs, with the waiting dot following it.
+
 ## 0.2.0 — 2026-11-03
 
 - New plugin icon in the bar, panel header and window: a toggle inside a sync
