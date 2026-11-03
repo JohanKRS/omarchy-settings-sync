@@ -158,6 +158,10 @@ class Theme:
             .feature-group-row {{ margin: 18px 6px 4px; }}
             .feature-group-icon {{ opacity: .8; }}
             .settings-error {{ color: {urgent}; }}
+            .settings-heading {{ margin: 22px 2px 6px; }}
+            .settings-heading.first {{ margin-top: 2px; }}
+            .settings-group {{ border-top: 1px solid alpha({fg}, .12); }}
+            .settings-item {{ padding: 12px 2px; border-bottom: 1px solid alpha({fg}, .08); }}
             .feature-row.release-affected {{ box-shadow: inset 2px 0 {release}; }}
             .release-label {{ color: {release}; font-size: {max(1, size - 1)}px; }}
             .features-notice.release-notice {{ border-left-color: {release}; background: alpha({release}, .08); }}

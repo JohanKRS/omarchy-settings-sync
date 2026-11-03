@@ -806,7 +806,14 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         project_link = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.LinkButton))
         assert project_link.get_uri() == 'https://github.com/JohanKRS/omarchy-settings-sync'
         version = json.loads((Path(__file__).resolve().parents[1] / 'manifest.json').read_text())['version']
-        assert any(isinstance(w, Gtk.Label) and w.get_text() == 'v' + version for w in widgets(project_link.get_parent()))
+        assert any(isinstance(w, Gtk.Label) and w.get_text().endswith('v' + version) for w in widgets(project_link.get_parent()))
+        # Links open with the desktop handler after hiding the full-screen overlay.
+        with patch("app.Gio.AppInfo.launch_default_for_uri") as launch, patch.object(window, "dismiss") as hide:
+            project_link.emit("activate-link")
+            launch.assert_called_once_with('https://github.com/JohanKRS/omarchy-settings-sync', None)
+            hide.assert_called_once()
+        assert all(isinstance(w, Gtk.Label) or not w.has_css_class("settings-item") or w.get_parent().has_css_class("settings-group")
+                   for w in widgets(window.setup_panel)), "Settings items sit in divided groups" 
         window.popup_key(None, Gdk.KEY_Escape, 0, 0)
         assert window.setup_panel not in window.panels and window.pages.get_visible_child_name() == "chat"
         assert window.chat_tab.get_active() and window.get_visible()

@@ -33,6 +33,7 @@ from catalog import MODEL_AGENTS, DISCOVERY_AGENTS, agent_executable, discover_m
 from claude_client import ClaudeClient, PERMISSION_MODES as CLAUDE_PERMISSION_MODES
 from outbox import Outbox
 from chat_view import ChatView
+import message_view
 from message_view import MessageBody
 from activity_indicator import ActivityIndicator
 from applier import delegation, removal
@@ -264,6 +265,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.theme = Theme(self)
         self.theme_timer = GLib.timeout_add_seconds(2, self.refresh_theme)
         self.attention_timer = GLib.timeout_add_seconds(10, self.update_attention)
+        message_view.LINK_OPENER = self.open_link
         self.updater = Updater(self.locations["state"] / "update.json")
         self.update_checking = False
         if application.get_application_id() == "org.omarchy.AgentSettings":
@@ -314,6 +316,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         title.set_selectable(False)
         title.set_hexpand(True)
         header.append(title)
+        self.header_icon, self.header_title = icon, title
         self.history_button = Gtk.Button(icon_name='document-open-recent-symbolic', tooltip_text=tr('Conversation history'))
         self.history_button.update_property([Gtk.AccessibleProperty.LABEL], [tr('Conversation history')])
         self.history_button.connect('clicked', lambda *_: self.show_history())
@@ -544,11 +547,23 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.popup_canvas.move(self.popup_card, x, y)
         self.update_attention(force=True)
 
+    def align_header_icon(self):
+        """Put the icon's centre, its toggle knob, on the centre line of the title's capital O.
+
+        Boxes centre the label's whole line box, which includes room for
+        descenders, so a capital letter's centre sits above it."""
+        layout = self.header_title.create_pango_layout("O")
+        ink, logical = layout.get_pixel_extents()
+        lift = logical.height / 2 - (ink.y + ink.height / 2)
+        self.header_icon.set_margin_bottom(max(0, round(2 * lift)))
+        return False
+
     def focus_content(self, *_):
         if self.idle_timer is not None:
             GLib.source_remove(self.idle_timer)
             self.idle_timer = None
         self.theme.refresh()
+        self.align_header_icon()
         if not self.panels:
             target = self.vte if self.terminal_pid and self.vte else self.input
             target.grab_focus()
@@ -586,6 +601,21 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if not (left <= x <= left + width and top <= y <= top + height):
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
             self.dismiss()
+
+    def open_link(self, uri):
+        """Open a link with the desktop's handler. The panel covers the whole screen
+        as an overlay layer, so it is hidden first; otherwise the browser would open
+        behind it, and GTK's portal request has no parent window to attach to."""
+        self.dismiss()
+        try:
+            Gio.AppInfo.launch_default_for_uri(uri, None)
+        except GLib.Error:
+            try:
+                subprocess.Popen(["xdg-open", uri], start_new_session=True,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError as error:
+                self.status.set_text(str(error))
+        return True
 
     def dismiss(self):
         self.save_conversation()
@@ -1778,7 +1808,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
             if params.get("mode") == "url":
                 url = params.get("url", "")
                 if url.startswith(("https://", "http://localhost", "http://127.0.0.1")):
-                    content.append(Gtk.LinkButton(uri=url, label=tr('Open in browser')))
+                    browser = Gtk.LinkButton(uri=url, label=tr('Open in browser'))
+                    browser.connect("activate-link", lambda button: self.open_link(button.get_uri()))
+                    content.append(browser)
                 approve = {"action": "accept"}
             elif params.get("mode") in ("form", "openai/form", "openaiForm"):
                 schema = params.get("requestedSchema", {})
@@ -2113,23 +2145,42 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return False
         dialog = TabPanel(self, "settings")
         self.setup_panel = dialog
-        content = box(spacing=10)
+        content = box(spacing=0)
         content.add_css_class("settings-page")
         content.set_margin_end(10)  # Keep fields clear of the overlay scrollbar.
         dialog.set_content(content)
+        groups = {}
         def section(text, first=False):
             heading = label(text.upper(), "feature-group")
             heading.set_selectable(False)
-            if not first:
-                heading.set_margin_top(14)
+            heading.add_css_class("settings-heading")
+            if first:
+                heading.add_css_class("first")
             content.append(heading)
+            group = box(spacing=0)
+            group.add_css_class("settings-group")
+            content.append(group)
+            groups["current"] = group
+        def item(*widgets, spacing=6):
+            row = box(spacing=spacing)
+            row.add_css_class("settings-item")
+            for widget in widgets:
+                row.append(widget)
+            groups["current"].append(row)
+            return row
+        def link_button(text, *, start=True):
+            button = Gtk.Button(label=text, halign=Gtk.Align.START if start else Gtk.Align.FILL)
+            button.add_css_class("flat")
+            button.add_css_class("link-action")
+            button.add_css_class("inline-link")
+            return button
         section(tr('Repository'), first=True)
         repository = Gtk.Entry(placeholder_text=tr('owner/dotfiles'))
         repository.set_text(self.settings.get("repository", ""))
-        content.append(self.control(tr('Repository for saving your settings'), repository))
+        item(self.control(tr('Repository for saving your settings'), repository))
         branch = Gtk.Entry(placeholder_text=tr('Default branch'))
         branch.set_text(self.settings.get("branch", ""))
-        content.append(self.control(tr('Branch'), branch))
+        item(self.control(tr('Branch'), branch))
         error_label = label("", "settings-error")
         error_label.set_visible(False)
         is_claude = self.agent() == 'claude'
@@ -2161,58 +2212,49 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.submit(tr('Create my configuration repository'), create=True)
             elif review_existing:
                 self.submit(tr('Review my existing customizations'), review_existing=True)
-        buttons = box(False, 6)
+        buttons = box(False, 10)
         existing = Gtk.Button(label=tr('Use repository'))
         existing.add_css_class("suggested-action")
         existing.connect("clicked", lambda *_: save())
-        create = Gtk.Button(label=tr('Create repository'))
-        create.add_css_class("flat")
-        create.add_css_class("link-action")
+        create = link_button(tr('Create repository'))
         create.set_tooltip_text(tr('Ask the agent to create the repository entered above. This address is saved for future syncs.'))
         create.connect("clicked", lambda *_: save(True))
         buttons.append(existing)
         buttons.append(create)
-        content.append(buttons)
-        content.append(error_label)
+        item(buttons, error_label)
         section(tr('Agent'))
         if self.model_info.get_parent():
             self.model_info.get_parent().remove(self.model_info)
-        content.append(self.model_info)
+        item(self.model_info)
         permissions = self.control(tr('Claude permissions') if is_claude else tr('Codex permissions'), mode)
-        permissions.set_visible(self.agent() in NATIVE_AGENTS)
-        content.append(permissions)
-        resume = Gtk.Button(label=tr('Continue conversation in terminal'), halign=Gtk.Align.START)
-        resume.add_css_class("flat")
-        resume.add_css_class("link-action")
-        resume.add_css_class("inline-link")
+        permissions_item = item(permissions)
+        permissions_item.set_visible(self.agent() in NATIVE_AGENTS)
+        resume = link_button(tr('Continue conversation in terminal'))
         resume.set_sensitive(not locked and bool(self.thread_id) and self.agent() in NATIVE_AGENTS)
         resume.connect("clicked", lambda *_: self.resume_in_terminal())
-        content.append(resume)
+        item(resume)
         section(tr('Existing customizations'))
         hint = label(tr('Find portable changes already on this machine and choose what to save to your repository.'), "feature-subtitle")
-        content.append(hint)
-        review = Gtk.Button(label=tr('Review existing customizations'), halign=Gtk.Align.START)
-        review.add_css_class("flat")
-        review.add_css_class("link-action")
-        review.add_css_class("inline-link")
+        review = link_button(tr('Review existing customizations'))
         review.set_tooltip_text(tr('Find portable changes already on this machine and choose what to save to your repository.'))
         review.set_sensitive(not locked and bool(self.executables[self.agent()]))
         review.connect('clicked', lambda *_: save(review_existing=True))
-        content.append(review)
+        item(hint, review, spacing=2)
         version = RUNNING_VERSION
         if version:
             section(tr('About'))
-            footer = label('v' + version, 'muted', selectable=True)
-            footer.set_wrap(False)
-            footer.add_css_class('settings-version')
             version_row = box(False, 8)
+            footer = label('Omarchy Settings Sync v' + version, None, selectable=True)
+            footer.set_wrap(False)
+            footer.set_hexpand(True)
             version_row.append(footer)
             repository_link = Gtk.LinkButton(uri='https://github.com/JohanKRS/omarchy-settings-sync', label='GitHub')
             repository_link.set_tooltip_text(tr('Project repository'))
             repository_link.add_css_class('flat')
-            repository_link.get_child().add_css_class('settings-version')
+            repository_link.add_css_class('link-action')
+            repository_link.connect("activate-link", lambda button: self.open_link(button.get_uri()))
             version_row.append(repository_link)
-            content.append(version_row)
+            item(version_row)
             automatic = box(False, 8)
             automatic_label = label(tr('Update automatically'))
             automatic_label.set_hexpand(True)
@@ -2225,22 +2267,15 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.save_settings()
             automatic_switch.connect("notify::active", automatic_changed)
             automatic.append(automatic_switch)
-            content.append(automatic)
             self.update_label = label("", "feature-subtitle")
-            content.append(self.update_label)
-            update_actions = box(False, 4)
-            check = Gtk.Button(label=tr('Check now'))
-            check.add_css_class("flat")
-            check.add_css_class("link-action")
-            check.add_css_class("inline-link")
+            update_actions = box(False, 12)
+            check = link_button(tr('Check now'))
             check.connect("clicked", lambda *_: self.check_updates(force=True))
             update_actions.append(check)
-            self.update_now = Gtk.Button(label=tr('Update now'))
-            self.update_now.add_css_class("flat")
-            self.update_now.add_css_class("link-action")
+            self.update_now = link_button(tr('Update now'))
             self.update_now.connect("clicked", lambda *_: self.check_updates(force=True, install=True))
             update_actions.append(self.update_now)
-            content.append(update_actions)
+            item(automatic, self.update_label, update_actions, spacing=4)
             self.refresh_update_status()
             self.settings_about = content
         if locked:
