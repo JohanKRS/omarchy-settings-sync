@@ -114,6 +114,12 @@ name = "desktop"
 "firefox-popups.profile-module" = "off"
 ```
 
+**Remove from repository**, in a customization's details, deletes it
+everywhere: the panel undoes it on this machine, returning to the Omarchy
+default, and asks the agent to delete its catalog entry, its source files, its
+documentation and its machine entries, then publish. Every other machine
+undoes it on its next Sync, using its own record of what was applied.
+
 Validate a catalog with `python3 plugin/features.py validate <repository>`.
 Customizations saved with **Push changes** disabled go to a local catalog on
 that machine and are marked **this machine only**.

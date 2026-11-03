@@ -19,7 +19,7 @@ import subprocess
 import tomllib
 
 from core import private_write, read_json
-from features import OMARCHY_PATH, expand, inside, part_enabled, xdg
+from features import KINDS, OMARCHY_PATH, Feature, Part, expand, inside, part_enabled, xdg
 
 COMMENTS = {".lua": ("--", ""), ".js": ("//", ""), ".mjs": ("//", ""), ".css": ("/*", " */"),
             ".qml": ("//", ""), ".jsonc": ("//", "")}
@@ -216,6 +216,11 @@ class Applier:
                 raise Conflict(f"{path} is a link outside the home directory")
             path = target
         return path
+
+    def record(self, feature, part, values):
+        """Store a part with its definition, so it can be undone after leaving the catalog."""
+        self.ledger.set_part(feature.id, part.key, dict(values, part=part.data, index=part.index))
+        self.ledger.data["features"][feature.id]["title"] = feature.title
 
     def write(self, path, data, mode=None):
         _write(path, data, mode)
@@ -418,7 +423,10 @@ class Applier:
                 first -= 1
             del lines[first:last]
         else:
-            want = self.block_content(part)
+            try:
+                want = self.block_content(part)
+            except OSError:
+                return  # The source left the repository and no marked block remains.
             if not want or want not in text:
                 return
             lines = text.replace(want, "", 1).splitlines()
@@ -753,12 +761,12 @@ class Applier:
             if part.agent:
                 if not (record and record.get("status") == "applied"
                         and record.get("instructions") == self.instructions_digest(part)):
-                    self.ledger.set_part(feature.id, part.key, {"status": "delegated", "kind": "agent"})
+                    self.record(feature, part, {"status": "delegated", "kind": "agent"})
                     outcome.delegated.append({"part": part, "action": "on", "reason": "needs the agent"})
                 continue
             try:
                 updated = self.handler(part, "apply")(feature, part, record)
-                self.ledger.set_part(feature.id, part.key, dict(updated, kind=part.kind, status="applied"))
+                self.record(feature, part, dict(updated, kind=part.kind, status="applied"))
                 outcome.done.append(part.title)
             except Conflict as error:
                 outcome.delegated.append({"part": part, "action": "on", "reason": f"conflict: {error}"})
@@ -805,7 +813,7 @@ class Applier:
                 outcome.delegated.append({"part": part, "action": outcome.action, "reason": f"failed: {step}: {reason}"})
                 record = self.ledger.part(feature.id, part.key)
                 if record and outcome.action == "on":
-                    self.ledger.set_part(feature.id, part.key, dict(record, status="failed", note=reason[:500]))
+                    self.record(feature, part, dict(record, status="failed", note=reason[:500]))
         for outcome in outcomes:
             for part in outcome.feature.parts:
                 if not part.admin or (outcome.feature.id, part.key) in failed_keys:
@@ -844,14 +852,14 @@ class Applier:
                 if status == "reverted":
                     self.ledger.drop_part(feature_id, part.key)
                 elif status == "applied" and part.agent:
-                    self.ledger.set_part(feature_id, part.key, {
+                    self.record(feature, part, {
                         "kind": "agent", "status": "applied", "note": str(result.get("note", ""))[:500],
                         "instructions": self.instructions_digest(part)})
                 elif status == "applied":
                     self.adopt(feature, part)
                 elif status == "failed":
                     record = dict(self.ledger.part(feature_id, part.key) or {"kind": part.kind})
-                    self.ledger.set_part(feature_id, part.key, dict(record, status="failed",
+                    self.record(feature, part, dict(record, status="failed",
                                                                     note=str(result.get("note", ""))[:500]))
         self.ledger.save()
         Path(path).unlink(missing_ok=True)
@@ -875,7 +883,42 @@ class Applier:
                 record.update(values={key: get(key)[1] for key in values}, source=dict(values))
         except (OSError, ValueError, Conflict, UnicodeDecodeError):
             pass
-        self.ledger.set_part(feature.id, part.key, record)
+        self.record(feature, part, record)
+
+
+def orphans(ledger, features):
+    """Features applied here that left the catalog, rebuilt from the ledger so Sync can undo them."""
+    known = {feature.id for feature in features}
+    result = []
+    for feature_id, entry in ledger.data["features"].items():
+        if feature_id in known or not isinstance(entry, dict):
+            continue
+        parts = [Part(record["part"]["kind"], dict(record["part"]), int(record.get("index", 0)))
+                 for record in entry.get("parts", {}).values()
+                 if isinstance(record, dict) and isinstance(record.get("part"), dict)
+                 and record["part"].get("kind") in KINDS]
+        if parts:
+            parts.sort(key=lambda part: part.index)
+            result.append(Feature(id=feature_id, title=str(entry.get("title", feature_id)), parts=parts))
+    return result
+
+
+def removal(feature, outcome, results_path, *, machine, local_catalog=None):
+    """Ask the agent to delete a customization from the repository after it was undone here."""
+    where = (f"do catálogo local {local_catalog}" if feature.local and local_catalog
+             else "de features.toml no repositório de configurações")
+    lines = [
+        f"REMOVER PERSONALIZAÇÃO DO REPOSITÓRIO. O usuário pediu para remover '{feature.title}' "
+        f"({feature.id}) de todas as máquinas, e isso autoriza publicar a remoção.",
+        f"O plugin já desfez nesta máquina ({machine}) o que conseguiu, voltando ao padrão do Omarchy.",
+        f"No repositório: remova a entrada {where}, os arquivos de origem usados apenas por ela, as "
+        "menções em README e SYNC.md e as entradas dela em machines/*.toml. Ajuste `requires` de outras "
+        "personalizações que dependiam dela e não altere mais nada. Valide o catálogo e publique.",
+        "As outras máquinas desfazem esta personalização no próximo Sync, pelo registro local de cada uma.",
+    ]
+    if outcome.delegated or outcome.errors:
+        lines += ["", "Ainda falta desfazer nesta máquina:", delegation([outcome], results_path, machine=machine)]
+    return "\n".join(lines)
 
 
 def status(feature, choice, mode, ledger, states, failing=None):

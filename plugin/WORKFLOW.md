@@ -171,6 +171,10 @@ simple parts itself and sends you only what needs judgment or a conflict.
 - **Delegated work.** A request titled "APLICAR CONFIGURAÇÕES DO CATÁLOGO" lists
   only the parts left for you. Apply or revert those, resolve listed conflicts
   without discarding local edits, then write the result file it names.
+- **Removing a customization.** A request titled "REMOVER PERSONALIZAÇÃO DO
+  REPOSITÓRIO" authorizes deleting that feature everywhere: its catalog entry,
+  source files used only by it, its documentation and machine entries. The
+  plugin already undid it locally and undoes it on other machines at Sync.
 - **Sync with a catalog** is run by the plugin. You are called only for the
   parts it could not finish. Without a catalog, follow the Sync section above.
 

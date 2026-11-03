@@ -242,5 +242,11 @@
   "Start {name} over as a new machine? Its saved choices are cleared and nothing is applied until you choose.": "¿Empezar {name} de cero, como una máquina nueva? Sus opciones guardadas se borran y no se aplica nada hasta que elijas.",
   "Turn all on": "Activar todas",
   "Turn all off": "Desactivar todas",
-  "{count} customizations are waiting for your choice. Nothing is installed until you turn them on and apply.": "{count} personalizaciones esperan tu elección. No se instala nada hasta que las actives y apliques."
+  "{count} customizations are waiting for your choice. Nothing is installed until you turn them on and apply.": "{count} personalizaciones esperan tu elección. No se instala nada hasta que las actives y apliques.",
+  "Remove from repository": "Quitar del repositorio",
+  "Remove everywhere": "Quitar de todo",
+  "Remove “{title}” from every machine? It is undone here now, deleted from the repository, and other machines undo it on their next Sync.": "¿Quitar “{title}” de todas las máquinas? Se deshace aquí ahora, se borra del repositorio y las demás máquinas la deshacen en su próxima sincronización.",
+  "Also used by: {names}.": "También la usan: {names}.",
+  "Removing “{title}”…": "Quitando “{title}”…",
+  "Remove “{title}” from the repository": "Quitar “{title}” del repositorio"
 }

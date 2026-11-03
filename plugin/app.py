@@ -35,10 +35,11 @@ from outbox import Outbox
 from chat_view import ChatView
 from message_view import MessageBody
 from activity_indicator import ActivityIndicator
-from applier import delegation
+from applier import delegation, removal
 import checkout
 from features import machine_name
-from features_view import FeaturesPage, changes_for_sync, collect, local_catalog, results_path, run_changes
+from features_view import (FeaturesPage, changes_for_sync, collect, local_catalog, make_applier, results_path,
+                           run_changes, save_machine)
 
 NATIVE_AGENTS = {"codex", "claude"}
 DIRECTION_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
@@ -1314,6 +1315,31 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 message += " " + note.format(problem=problem.splitlines()[0][:160])
             self.status.set_text(message)
         self.features_page.refresh()
+
+    def remove_feature(self, snapshot, feature):
+        """Undo a customization here, then have the agent delete it from the repository."""
+        if self.busy or self.terminal_pid or self.delivery_pending:
+            self.status.set_text(tr('Stop the current task first.'))
+            return
+        self.busy = True
+        self.status.set_text(tr('Removing “{title}”…', title=feature.title))
+        self.update_buttons()
+        def work():
+            # Keep it off here even if the repository cleanup does not finish.
+            snapshot.machine.setdefault("features", {})[feature.id] = "off"
+            save_machine(self, snapshot, publish=False)
+            applier = make_applier(self, snapshot.checkout, snapshot.ledger)
+            outcome = applier.disable(feature, "default")
+            applier.finish([outcome])
+            return outcome
+        def done(outcome):
+            self.busy = False
+            self.update_buttons()
+            self.show_page("chat")
+            self.submit(tr('Remove “{title}” from the repository', title=feature.title), publish=True,
+                        features_task=removal(feature, outcome, results_path(self), machine=snapshot.machine_name,
+                                              local_catalog=local_catalog(self)))
+        self.worker(work, done)
 
     def migrate_catalog(self):
         self.show_page("chat")

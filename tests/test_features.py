@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'plugin'))
-from applier import Applier, Ledger, delegation, status
+from applier import Applier, Ledger, delegation, orphans, removal, status
 from features import (Probe, desired, expand, install_id, list_machines, load_catalog, load_machine,
                       machine_path, machine_text, ordered, part_enabled, remove_machine, rename_machine)
 
@@ -329,6 +329,27 @@ class FeatureTest(unittest.TestCase):
         self.assertEqual([item['part'].key for item in off.delegated], ['profile'])
         self.assertFalse(self.config('hypr/settings-sync/popups.lua').exists())
         self.assertFalse(self.config('hypr/hyprland.lua').exists())  # Created by the feature, now empty.
+
+    def test_features_removed_from_the_catalog_are_undone_from_the_ledger(self):
+        shell = self.config('omarchy/shell.json')
+        shell.parent.mkdir(parents=True)
+        shell.write_text(json.dumps({'idle': {'screensaver': 120, 'lock': 240}}))
+        self.applier.finish([self.applier.enable(self.by_id['idle'], {}),
+                             self.applier.enable(self.by_id['lock-shortcut'], {})])
+        remaining = [f for f in self.features if f.id != 'idle']
+        (self.repo / 'desktop/lock.lua').unlink()  # Sources may leave the repository too.
+        found = orphans(self.ledger, remaining)
+        self.assertEqual([f.id for f in found], ['idle'])
+        self.assertEqual(found[0].title, 'Screensaver after 5 minutes')
+        self.applier.finish([self.applier.disable(found[0], 'default')])
+        self.assertEqual(json.loads(shell.read_text())['idle'], {'screensaver': 150, 'lock': 300})
+        self.assertFalse(self.ledger.applied('idle'))
+        orphan_lock = orphans(Ledger(self.state / 'applied.json'), [])
+        self.applier.finish([self.applier.disable(next(f for f in orphan_lock if f.id == 'lock-shortcut'))])
+        self.assertNotIn('settings-sync', self.config('hypr/bindings.lua').read_text() if self.config('hypr/bindings.lua').exists() else '')
+        text = removal(self.by_id['idle'], self.applier.disable(self.by_id['idle']), self.state / 'r.json', machine='desk')
+        self.assertIn('REMOVER PERSONALIZAÇÃO DO REPOSITÓRIO', text)
+        self.assertIn('idle', text)
 
     def test_disabled_optional_part_is_skipped(self):
         machine = {'parts': {'popups.profile': 'off'}}

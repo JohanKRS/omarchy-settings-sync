@@ -171,6 +171,8 @@ class Theme:
             .features-banner {{ border: 1px solid alpha({warning}, .6); background: alpha({warning}, .08);
                                 border-radius: {radius}px; padding: 8px 10px; }}
             .pending-bar {{ border-top: 1px solid alpha({fg}, .16); padding-top: 8px; }}
+            button.destructive {{ color: {urgent}; border-color: alpha({urgent}, .6); }}
+            button.destructive:hover:not(:disabled) {{ background: alpha({urgent}, .12); }}
         """.encode())
         if self.window.vte:
             def rgba(value):

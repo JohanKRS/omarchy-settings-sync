@@ -7,7 +7,7 @@ from pathlib import Path
 
 from gi.repository import GLib, Gtk, Pango
 
-from applier import Applier, Ledger, delegation, status
+from applier import Applier, Ledger, delegation, orphans, status
 import checkout
 from context import repository_state
 from core import private_write
@@ -40,6 +40,7 @@ class Snapshot:
     failing: dict = field(default_factory=dict)
     machines: list = field(default_factory=list)
     binding_needed: bool = False
+    orphans: list = field(default_factory=list)
 
     @property
     def catalog(self):
@@ -88,6 +89,7 @@ def collect(window, *, fetch=False):
     applier = make_applier(window, path, snapshot.ledger)
     if results_path(window).exists():
         applier.merge_agent_results(results_path(window), snapshot.features)
+    snapshot.orphans = orphans(snapshot.ledger, snapshot.features)
     probe = Probe()
     for feature in snapshot.features:
         failing = probe.applicable(feature)
@@ -103,7 +105,8 @@ def collect(window, *, fetch=False):
 
 def changes_for_sync(snapshot):
     """Features a Sync should process on this machine: (feature, action, mode)."""
-    result = []
+    # Customizations removed from the repository are undone where they were applied.
+    result = [(feature, "off", "default") for feature in snapshot.orphans]
     for feature in ordered(snapshot.features):
         if feature.id in snapshot.failing:
             continue
@@ -213,6 +216,7 @@ class FeaturesPage(Gtk.Box):
         self.append(self.bar)
         self.banner_mode = None
         self.controls = []
+        self.removing = None
 
     def sync_sensitivity(self):
         for widget in self.controls:
@@ -411,12 +415,51 @@ class FeaturesPage(Gtk.Box):
             self.controls.append(option)
             option.connect("toggled", lambda widget, m=mode: widget.get_active() and self.mode_changed(feature, m))
             content.append(option)
-        talk = Gtk.Button(label=tr('Talk about this customization'), halign=Gtk.Align.START)
+        # Stacked: long labels in the narrow panel must not widen it.
+        actions = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, halign=Gtk.Align.START)
+        talk = Gtk.Button(label=tr('Talk about this customization'))
         talk.connect("clicked", lambda *_: self.window.discuss_feature(feature))
-        content.append(talk)
+        actions.append(talk)
+        if self.removing != feature.id:
+            remove = Gtk.Button(label=tr('Remove from repository'))
+            remove.add_css_class("destructive")
+            remove.set_sensitive(not self.window.busy)
+            self.controls.append(remove)
+            remove.connect("clicked", lambda *_: self.ask_removal(feature))
+            actions.append(remove)
+        content.append(actions)
+        if self.removing == feature.id:
+            others = [f.title for f in dependents(snapshot.features, feature.id)]
+            text = tr('Remove “{title}” from every machine? It is undone here now, deleted from the repository, and other machines undo it on their next Sync.',
+                      title=feature.title)
+            if others:
+                text += " " + tr('Also used by: {names}.', names=", ".join(others))
+            question = Gtk.Label(label=text, xalign=0, wrap=True)
+            question.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            content.append(question)
+            confirm = Gtk.Box(spacing=6)
+            yes = Gtk.Button(label=tr('Remove everywhere'))
+            yes.add_css_class("destructive")
+            yes.set_sensitive(not self.window.busy)
+            self.controls.append(yes)
+            yes.connect("clicked", lambda *_: self.remove(feature))
+            confirm.append(yes)
+            cancel = Gtk.Button(label=tr('Cancel'))
+            cancel.connect("clicked", lambda *_: self.ask_removal(None))
+            confirm.append(cancel)
+            content.append(confirm)
         return content
 
     # Staging ---------------------------------------------------------------
+    def ask_removal(self, feature):
+        self.removing = feature.id if feature else None
+        GLib.idle_add(self.render)
+
+    def remove(self, feature):
+        self.removing = None
+        self.staged.pop(feature.id, None)
+        self.window.remove_feature(self.snapshot, feature)
+
     def toggle_details(self, feature):
         self.expanded.symmetric_difference_update({feature.id})
         self.render()

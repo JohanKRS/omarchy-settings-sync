@@ -11,6 +11,9 @@
   hands judgment steps and conflicts with local edits to the agent.
 - Turning a customization off returns it to the Omarchy default, keeps it as
   it is, or restores the earlier backup. Optional parts have their own switch.
+- **Remove from repository** undoes a customization here and asks the agent to
+  delete it from the repository; other machines undo it on their next Sync from
+  their own record, even after its files are gone.
 - With a catalog, **Sync** applies what is on for this machine without
   starting the agent unless needed. Repositories without a catalog keep the
   agent-led Sync; **Create catalog** asks the agent to convert them.

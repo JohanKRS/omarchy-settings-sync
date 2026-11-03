@@ -871,6 +871,21 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         wait(lambda: not page.loading and not (checkout_dir / f"machines/{other}.toml").exists())
         if page.machines_panel in window.panels:
             page.machines_panel.destroy()
+        # Removing a customization undoes it here and asks the agent to delete it from the repository.
+        page.refresh()
+        wait(lambda: not page.loading and page.snapshot.features)
+        lock = next(f for f in page.snapshot.features if f.id == "lock")
+        page.expanded.add("lock")
+        page.ask_removal(lock)
+        wait(lambda: any(isinstance(w, Gtk.Button) and w.get_label() == tr("Remove everywhere") for w in widgets(page.listing)))
+        with patch.object(window, "submit", return_value=True) as removal_request:
+            page.remove(lock)
+            wait(lambda: removal_request.called)
+            assert removal_request.call_args.kwargs["publish"] is True
+            assert removal_request.call_args.kwargs["features_task"].startswith("REMOVER")
+        machine_file = checkout_dir / f"machines/{page.snapshot.machine_name}.toml"
+        assert '"lock" = "off"' in machine_file.read_text() or 'lock = "off"' in machine_file.read_text(), machine_file.read_text()
+        wait(lambda: not window.busy)
         window.close_client()
         with patch.object(window, "quit_if_idle") as cleanup:
             window.popup_key(None, Gdk.KEY_Escape, 0, 0)

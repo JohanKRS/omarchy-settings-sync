@@ -51,7 +51,8 @@ The **Customizations** tab lists every setting saved in your repository, with
 a switch and its state on this machine. Settings that span several apps, such
 as a Hyprland rule plus a Firefox module, switch as one. Changes are staged
 until **Apply**; turning one off can return it to the Omarchy default, keep it
-as it is, or restore the earlier backup. The panel applies files, snippets,
+as it is, or restore the earlier backup. **Remove from repository** deletes one
+everywhere: other machines undo it on their next Sync. The panel applies files, snippets,
 keys, MIME defaults, services and packages itself, asking for the administrator
 password once when needed, and calls the agent only for steps that need its
 judgment or for conflicts with local edits. See the
