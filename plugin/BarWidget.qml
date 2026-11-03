@@ -88,33 +88,68 @@ Ui.BarWidget {
   // vector so it follows the bar colour. BarIconButton loads it into its
   // 16 px optical canvas in place of a font glyph.
   //
-  // This is the bar's optical size of plugin/icons/omarchy-settings-sync-symbolic.svg:
-  // the same shape with slightly heavier lines, drawn at 12/16 of the canvas
-  // and lifted 0.9/16 so its size, weight and centre line match the font
-  // glyphs beside it (those sit a little above the canvas centre).
+  // The bar draws its other icons from a hinted font, so their edges sit on
+  // whole screen pixels. This version of plugin/icons/omarchy-settings-sync-symbolic.svg
+  // is drawn on a coarse grid whose unit is a whole number of physical
+  // pixels, and its origin is snapped to the pixel grid, so its strokes are
+  // as crisp as the glyphs beside it. It is 9 x 8 units, about the size of
+  // those glyphs, and sits on their slightly raised centre line.
   Component {
     id: syncIcon
 
     Item {
       id: syncGlyph
       readonly property color tint: button.active && button.useActiveColor ? button.activeColor : button.foreground
-      readonly property real drawSize: height * 12 / 16
+      readonly property real dpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+      // One grid unit in physical pixels; 10 units span about 12/16 of the canvas.
+      readonly property int unit: Math.max(1, Math.round(height * 12 / 16 * dpr / 10))
+      readonly property real step: unit / dpr
+      readonly property real lift: Math.round(height * 0.9 / 16 * dpr) / dpr
+
+      function px(x, y) { return (x * unit) + " " + (y * unit) }
+
+      function place() {
+        // Centre the 9 x 8 unit drawing (x 0.5-9.5, y 1-9), then snap to physical pixels.
+        var origin = syncGlyph.mapToItem(null, 0, 0)
+        var left = width / 2 - 5 * step
+        var top = height / 2 - 5 * step - lift
+        syncShape.x = Math.round((origin.x + left) * dpr) / dpr - origin.x
+        syncShape.y = Math.round((origin.y + top) * dpr) / dpr - origin.y
+      }
+
+      onWidthChanged: place()
+      onHeightChanged: place()
+      Component.onCompleted: place()
+
+      Timer {
+        // The bar may still be laying out when the icon first loads.
+        interval: 300
+        running: true
+        onTriggered: syncGlyph.place()
+      }
 
       Shape {
         id: syncShape
-        width: 24
-        height: 24
-        x: (syncGlyph.width - syncGlyph.drawSize) / 2
-        y: (syncGlyph.height - syncGlyph.drawSize) / 2 - syncGlyph.height * 0.9 / 16
-        scale: syncGlyph.drawSize / 24
+        width: 10 * syncGlyph.unit
+        height: 10 * syncGlyph.unit
+        scale: 1 / syncGlyph.dpr
         transformOrigin: Item.TopLeft
-        preferredRendererType: Shape.CurveRenderer
+        preferredRendererType: Shape.GeometryRenderer
+        antialiasing: true
 
         ShapePath {
           fillColor: syncGlyph.tint
           strokeColor: "transparent"
           strokeWidth: -1
-          PathSvg { path: "M2.25 14.75V4.75h15.23l-2.25-2.25L17 .73l6.52 6.52H4.75v7.5zM21.75 9.25v10H6.52l2.25 2.25L7 23.27.48 16.75h18.77v-7.5zM12 9.25h5.5v5.5H12z" }
+          PathSvg {
+            path: "M" + syncGlyph.px(0.5, 7) + "L" + syncGlyph.px(0.5, 2) + "L" + syncGlyph.px(8, 2) + "L" + syncGlyph.px(8, 3)
+                  + "L" + syncGlyph.px(1.5, 3) + "L" + syncGlyph.px(1.5, 7) + "Z"
+                  + "M" + syncGlyph.px(8, 1) + "L" + syncGlyph.px(9.5, 2.5) + "L" + syncGlyph.px(8, 4) + "Z"
+                  + "M" + syncGlyph.px(9.5, 3) + "L" + syncGlyph.px(9.5, 8) + "L" + syncGlyph.px(2, 8) + "L" + syncGlyph.px(2, 7)
+                  + "L" + syncGlyph.px(8.5, 7) + "L" + syncGlyph.px(8.5, 3) + "Z"
+                  + "M" + syncGlyph.px(2, 6) + "L" + syncGlyph.px(0.5, 7.5) + "L" + syncGlyph.px(2, 9) + "Z"
+                  + "M" + syncGlyph.px(5, 4) + "L" + syncGlyph.px(7, 4) + "L" + syncGlyph.px(7, 6) + "L" + syncGlyph.px(5, 6) + "Z"
+          }
         }
       }
 
@@ -122,8 +157,8 @@ Ui.BarWidget {
       // colour, plus a dot just outside its top-right corner.
       Rectangle {
         visible: root.waiting
-        x: syncShape.x + syncGlyph.drawSize - 1
-        y: syncShape.y - 2
+        x: syncShape.x + 9.5 * syncGlyph.step - 1
+        y: syncShape.y + syncGlyph.step - 3
         width: 4
         height: 4
         radius: 2
