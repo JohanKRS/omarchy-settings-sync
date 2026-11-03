@@ -248,5 +248,6 @@
   "Remove “{title}” from every machine? It is undone here now, deleted from the repository, and other machines undo it on their next Sync.": "¿Quitar “{title}” de todas las máquinas? Se deshace aquí ahora, se borra del repositorio y las demás máquinas la deshacen en su próxima sincronización.",
   "Also used by: {names}.": "También la usan: {names}.",
   "Removing “{title}”…": "Quitando “{title}”…",
-  "Remove “{title}” from the repository": "Quitar “{title}” del repositorio"
+  "Remove “{title}” from the repository": "Quitar “{title}” del repositorio",
+  "Back to customizations": "Volver a las personalizaciones"
 }

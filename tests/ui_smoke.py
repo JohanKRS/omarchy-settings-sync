@@ -838,10 +838,14 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert window.pages.get_visible_child_name() == "chat"
         wait(lambda: not page.loading)
         # Machines: create and link, rename the linked one, remove another.
-        page.refresh()
+        window.show_page("features")
         wait(lambda: not page.loading and page.snapshot.machines)
         page.show_machines()
-        content = page.machines_panel.scroll.get_child().get_child() if hasattr(page.machines_panel.scroll.get_child(), "get_child") else page.machines_panel.scroll.get_child()
+        content = page.machines_content
+        assert page.showing_machines and not window.panels, "Machines is a screen of the tab, not an overlay card"
+        window.popup_key(None, Gdk.KEY_Escape, 0, 0)
+        assert not page.showing_machines and window.get_visible()
+        page.show_machines()
         page.machine_action(content, "create", "laptop")
         wait(lambda: window.settings.get("machine") == "laptop" and not page.loading)
         assert (checkout_dir / "machines/laptop.toml").exists()
@@ -869,8 +873,7 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         page.show_machines()
         page.machine_action(content, "remove", other)
         wait(lambda: not page.loading and not (checkout_dir / f"machines/{other}.toml").exists())
-        if page.machines_panel in window.panels:
-            page.machines_panel.destroy()
+        page.hide_machines()
         # Removing a customization undoes it here and asks the agent to delete it from the repository.
         page.refresh()
         wait(lambda: not page.loading and page.snapshot.features)

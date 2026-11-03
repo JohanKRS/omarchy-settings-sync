@@ -512,6 +512,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
             if self.panels:
                 self.panels[-1].on_close()
                 return True
+            if self.pages.get_visible_child_name() == "features" and self.features_page.showing_machines:
+                self.features_page.hide_machines()
+                return True
             # Escape closes a selector before it closes the whole panel.
             def close_popover(widget):
                 child = widget.get_first_child()
@@ -1282,9 +1285,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 return
             self.features_applied(snapshot, outcomes, snapshot.problem, sync=True)
         self.worker(work, done)
-
-    def make_panel(self, title):
-        return Panel(self, title)
 
     def show_page(self, name):
         self.pages.set_visible_child_name(name)

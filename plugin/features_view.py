@@ -159,6 +159,9 @@ class FeaturesPage(Gtk.Box):
         self.loading = False
         for side in ("top", "bottom", "start", "end"):
             getattr(self, "set_margin_" + side)(14)
+        # The list and the machines screen share the tab, one level deep.
+        self.views = Gtk.Stack(vexpand=True, hhomogeneous=False, vhomogeneous=False)
+        main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         tools = Gtk.Box(spacing=8)
         self.search = Gtk.SearchEntry(placeholder_text=tr('Search customizations'), hexpand=True)
         self.search.connect("search-changed", lambda *_: self.render())
@@ -166,7 +169,7 @@ class FeaturesPage(Gtk.Box):
         self.filter = Gtk.DropDown.new_from_strings([tr(FILTER_LABELS[key]) for key in FILTERS])
         self.filter.connect("notify::selected", lambda *_: self.render())
         tools.append(self.filter)
-        self.append(tools)
+        main.append(tools)
         machine_row = Gtk.Box(spacing=8)
         self.machine_label = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
         self.machine_label.add_css_class("muted")
@@ -175,7 +178,7 @@ class FeaturesPage(Gtk.Box):
         self.machines_button.add_css_class("flat")
         self.machines_button.connect("clicked", lambda *_: self.show_machines())
         machine_row.append(self.machines_button)
-        self.append(machine_row)
+        main.append(machine_row)
         self.banner = Gtk.Box(spacing=8, visible=False)
         self.banner.add_css_class("features-banner")
         self.banner_text = Gtk.Label(xalign=0, wrap=True, hexpand=True)
@@ -184,7 +187,7 @@ class FeaturesPage(Gtk.Box):
         self.banner_button = Gtk.Button(valign=Gtk.Align.CENTER)
         self.banner_button.connect("clicked", lambda *_: self.banner_action())
         self.banner.append(self.banner_button)
-        self.append(self.banner)
+        main.append(self.banner)
         self.undecided = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
         self.undecided.add_css_class("features-banner")
         self.undecided_text = Gtk.Label(xalign=0, wrap=True)
@@ -196,11 +199,11 @@ class FeaturesPage(Gtk.Box):
             button.connect("clicked", lambda *_, value=state: self.decide_new(value))
             choices.append(button)
         self.undecided.append(choices)
-        self.append(self.undecided)
+        main.append(self.undecided)
         self.listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroll.set_child(self.listing)
-        self.append(scroll)
+        main.append(scroll)
         self.bar = Gtk.Box(spacing=8, visible=False)
         self.bar.add_css_class("pending-bar")
         self.bar_text = Gtk.Label(xalign=0, wrap=True, hexpand=True)
@@ -213,7 +216,25 @@ class FeaturesPage(Gtk.Box):
         self.apply_button.add_css_class("suggested-action")
         self.apply_button.connect("clicked", lambda *_: self.apply())
         self.bar.append(self.apply_button)
-        self.append(self.bar)
+        main.append(self.bar)
+        self.views.add_named(main, "list")
+        machines = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        header = Gtk.Box(spacing=8)
+        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text=tr('Back to customizations'))
+        back.add_css_class("flat")
+        back.update_property([Gtk.AccessibleProperty.LABEL], [tr('Back to customizations')])
+        back.connect("clicked", lambda *_: self.hide_machines())
+        header.append(back)
+        heading = Gtk.Label(label=tr('Machines'), xalign=0)
+        heading.add_css_class("feature-title")
+        header.append(heading)
+        machines.append(header)
+        self.machines_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        machines_scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        machines_scroll.set_child(self.machines_content)
+        machines.append(machines_scroll)
+        self.views.add_named(machines, "machines")
+        self.append(self.views)
         self.banner_mode = None
         self.controls = []
         self.removing = None
@@ -591,12 +612,15 @@ class FeaturesPage(Gtk.Box):
     def show_machines(self):
         if not self.snapshot or not self.snapshot.checkout:
             return
-        panel = self.window.make_panel(tr('Machines'))
-        self.machines_panel = panel
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        panel.set_content(content)
-        self.render_machines(content)
-        panel.present()
+        self.render_machines(self.machines_content)
+        self.views.set_visible_child_name("machines")
+
+    def hide_machines(self):
+        self.views.set_visible_child_name("list")
+
+    @property
+    def showing_machines(self):
+        return self.views.get_visible_child_name() == "machines"
 
     def render_machines(self, content, editing=None, confirming=None, message=""):
         while content.get_first_child():
@@ -753,8 +777,7 @@ class FeaturesPage(Gtk.Box):
             self.window.save_settings()
             if problem:
                 self.window.status.set_text(tr('Not published: {problem}', problem=problem.splitlines()[0][:160]))
-            if getattr(self, "machines_panel", None) in self.window.panels:
-                self.machines_panel.destroy()
+            self.hide_machines()
             self.refresh()
         def failed(message):
             self.loading = False
