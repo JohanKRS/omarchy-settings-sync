@@ -4,6 +4,9 @@
 
 - Align the bar icon with the icons beside it: same size, line weight and
   center line as the bar's font glyphs, with the waiting dot following it.
+- Draw the bar icon as crisply as those glyphs: tighter antialiasing and an
+  origin snapped to the device pixel grid, so its edges and the toggle knob
+  no longer look soft next to them.
 
 ## 0.2.0 — 2026-11-03
 
