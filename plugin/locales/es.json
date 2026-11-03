@@ -237,7 +237,6 @@
   "Use this name": "Usar este nombre",
   "Start {name} over as a new machine? Its saved choices are cleared and nothing is applied until you choose.": "¿Empezar {name} de cero, como una máquina nueva? Sus opciones guardadas se borran y no se aplica nada hasta que elijas.",
   "Turn all on": "Activar todas",
-  "Turn all off": "Desactivar todas",
   "Remove from repository": "Quitar del repositorio",
   "Remove everywhere": "Quitar de todo",
   "Remove “{title}” from every machine? It is undone here now, deleted from the repository, and other machines undo it on their next Sync.": "¿Quitar “{title}” de todas las máquinas? Se deshace aquí ahora, se borra del repositorio y las demás máquinas la deshacen en su próxima sincronización.",
@@ -248,7 +247,7 @@
   "Ask the agent": "Preguntar al agente",
   "Parts": "Partes",
   "When turned off on this machine": "Al desactivar en esta máquina",
-  "{count} waiting for your choice": "{count} esperando tu elección",
   "Nothing is installed until you turn customizations on and apply.": "No se instala nada hasta que actives las personalizaciones y apliques.",
-  "New machine": "Nueva máquina"
+  "New machine": "Nueva máquina",
+  "New machine: choose what to install": "Máquina nueva: elige qué instalar"
 }

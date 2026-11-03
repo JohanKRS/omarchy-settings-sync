@@ -22,8 +22,8 @@
 - Manage machines from the Customizations tab: list, rename, remove or create
   one, and link a reinstalled installation to its earlier machine or start it
   fresh. Sync waits until a new installation is linked. New and fresh machines
-  install nothing until you choose: every customization starts as **New**, with
-  **Turn all on** and **Turn all off** shortcuts.
+  install nothing until you choose: every customization starts as **New**, and
+  a brand-new machine offers **Turn all on**.
 
 ## 0.1.13 — 2026-10-27
 

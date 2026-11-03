@@ -196,12 +196,11 @@ class FeaturesPage(Gtk.Box):
         self.undecided_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self.undecided_text.set_tooltip_text(tr('Nothing is installed until you turn customizations on and apply.'))
         self.undecided.append(self.undecided_text)
-        for label, state in ((tr('Turn all on'), "on"), (tr('Turn all off'), "off")):
-            button = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
-            button.add_css_class("flat")
-            button.add_css_class("link-action")
-            button.connect("clicked", lambda *_, value=state: self.decide_new(value))
-            self.undecided.append(button)
+        turn_on = Gtk.Button(label=tr('Turn all on'), valign=Gtk.Align.CENTER)
+        turn_on.add_css_class("flat")
+        turn_on.add_css_class("link-action")
+        turn_on.connect("clicked", lambda *_: self.decide_new("on"))
+        self.undecided.append(turn_on)
         main.append(self.undecided)
         self.listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.listing.set_margin_end(10)  # Keep text clear of the overlay scrollbar.
@@ -312,9 +311,11 @@ class FeaturesPage(Gtk.Box):
             self.show_banner(tr('Showing the local copy. {problem}', problem=snapshot.problem), None)
         else:
             self.show_banner("", None)
-        undecided = [f for f in snapshot.features if snapshot.labels.get(f.id) == "new" and f.id not in self.staged]
-        self.undecided.set_visible(bool(undecided) and not snapshot.binding_needed)
-        self.undecided_text.set_text(tr('{count} waiting for your choice', count=len(undecided)))
+        # Only a brand-new machine needs the explanation; afterwards the New pill and filter suffice.
+        applicable = [f for f in snapshot.features if snapshot.labels.get(f.id) != "unavailable"]
+        fresh = bool(applicable) and all(snapshot.labels.get(f.id) == "new" for f in applicable)
+        self.undecided.set_visible(fresh and not self.staged and not snapshot.binding_needed)
+        self.undecided_text.set_text(tr('New machine: choose what to install'))
         query = self.search.get_text().casefold().strip()
         wanted = FILTERS[self.filter.get_selected()] if self.filter.get_selected() < len(FILTERS) else "all"
         groups = {}
