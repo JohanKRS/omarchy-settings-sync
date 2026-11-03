@@ -254,5 +254,8 @@
   "Without a catalog, Sync asks the agent.": "Sin catálogo, la sincronización la hace el agente.",
   "{count} updates to apply": "{count} actualizaciones para aplicar",
   "Up to date": "Al día",
-  "Up to date · synced {time}": "Al día · sincronizado a las {time}"
+  "Up to date · synced {time}": "Al día · sincronizado a las {time}",
+  "Programs": "Programas",
+  "Install": "Instalar",
+  "Uninstall": "Desinstalar"
 }

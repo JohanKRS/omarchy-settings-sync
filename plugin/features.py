@@ -25,7 +25,7 @@ ADMIN_KINDS = {"system-file", "package"}
 KINDS = LOCAL_KINDS | ADMIN_KINDS | {"agent"}
 DEFAULTS = {"on", "off", "ask"}
 OFF_MODES = ("default", "previous", "keep")
-GROUPS = ("desktop", "apps", "system")
+GROUPS = ("desktop", "apps", "system")  # Fallback grouping when a feature names no app.
 RELOADS = {"hyprland"}
 IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 PACKAGE = re.compile(r"[a-z0-9@._+-]+")
@@ -118,6 +118,9 @@ class Feature:
     reload: list = field(default_factory=list)
     parts: list = field(default_factory=list)
     local: bool = False
+    app: str = ""
+    icon: str = ""
+    program: str = ""  # "install" or "remove" for entries of the programs list
 
     @property
     def needs_agent(self):
@@ -234,11 +237,45 @@ def parse(text, repository, *, local=False, errors=None):
         if len(set(keys)) != len(keys):
             errors.append(f"{identifier}: two parts have the same target; give them ids")
             continue
+        app = str(entry.get("app") or (lists["areas"][0] if lists["areas"] else ""))
+        if app and not IDENTIFIER.fullmatch(app):
+            errors.append(f"{identifier}: app must be a short lowercase name, such as firefox")
+            continue
         features.append(Feature(
             id=identifier, title=str(entry["title"]), summary=str(entry.get("summary", "")),
             group=entry.get("group") if entry.get("group") in GROUPS else "apps",
-            default=entry.get("default", "on"), parts=parts, local=local, **lists))
+            default=entry.get("default", "on"), parts=parts, local=local, app=app,
+            icon=str(entry.get("icon", "")), **lists))
+    for entry in document.get("program", []):
+        program = parse_program(entry, errors, local)
+        if program:
+            features.append(program)
     return features
+
+
+def parse_program(entry, errors, local=False):
+    """A program to install or remove on each machine, without a full feature entry."""
+    package = str(entry.get("package", ""))
+    action = entry.get("action", "install")
+    if not PACKAGE.fullmatch(package):
+        errors.append(f"Invalid program package {package!r}")
+        return None
+    if action not in ("install", "remove"):
+        errors.append(f"{package}: action must be install or remove")
+        return None
+    if entry.get("default", "ask") not in DEFAULTS or not _strings(entry.get("when", [])):
+        errors.append(f"{package}: invalid default or when")
+        return None
+    if entry.get("aur") and action == "install":
+        # AUR helpers run as the user with their own prompts; the agent installs these.
+        data = {"kind": "agent", "id": "aur", "title": f"AUR: {package}",
+                "instructions": f"Install the AUR package {package} with `omarchy pkg aur add {package}`."}
+    else:
+        data = {"kind": "package", ("install" if action == "install" else "remove"): [package]}
+    return Feature(id=f"program-{package}", title=str(entry.get("title") or package),
+                   summary=str(entry.get("summary", "")), group="programs", default=entry.get("default", "ask"),
+                   when=list(entry.get("when", [])), parts=[Part(data["kind"], data, 0)], local=local,
+                   icon=str(entry.get("icon") or package), program=action)
 
 
 def load_catalog(repository, local_catalog=None):

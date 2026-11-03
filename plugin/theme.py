@@ -155,6 +155,10 @@ class Theme:
             .feature-subtitle {{ font-size: {max(1, size - 1)}px; color: alpha({fg}, .6); }}
             .feature-chevron {{ color: alpha({fg}, .45); margin-top: 2px; }}
             .feature-group-row {{ margin: 18px 6px 4px; }}
+            .feature-group-icon {{ opacity: .8; }}
+            .program-row {{ padding: 8px 6px; }}
+            .program-install {{ color: alpha({good}, .85); }}
+            .program-remove {{ color: alpha({urgent}, .85); }}
             .feature-group {{ font-size: {max(1, size - 2)}px; font-weight: 600; letter-spacing: 1px;
                               color: alpha({fg}, .55); }}
             .feature-count {{ font-size: {max(1, size - 2)}px; color: alpha({fg}, .4); }}

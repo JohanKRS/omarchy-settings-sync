@@ -133,7 +133,9 @@ simple parts itself and sends you only what needs judgment or a conflict.
 
 - **One feature per behavior the user recognizes** ("Super+L locks the screen").
   Fields: `id` (lowercase letters, digits, hyphens), `title` and `summary` in
-  the user's language, `group` (`desktop`, `apps` or `system`), `areas`,
+  the user's language, `app` (the application it belongs to, such as `firefox`
+  or `hyprland`; the panel groups by it), `group` (`system` for system-wide
+  settings without an app), `areas` (every area it touches),
   `default` for other machines (`on`, `off` or `ask`), `when` conditions
   (`package:`, `command:`, `path:`, `omarchy>=4.1`, `!` negates) and `requires`.
   When creating a feature, ask with the question tool whether other machines
@@ -148,6 +150,10 @@ simple parts itself and sends you only what needs judgment or a conflict.
   password prompt. Use `agent` with `title` and `instructions` (a README path
   or text) only for profile detection, hardware adaptation, downloads or other
   judgment. Give optional parts an `id` and `optional = true`.
+- **Programs to install or remove** go in the `[[program]]` list, not in a
+  feature: `package`, optional `title`, `action` (`install` or `remove`),
+  `aur = true` for AUR packages, and `default` (usually `ask`). Use a feature
+  with a `package` part only when the package is part of a larger setting.
 - **Keep features independent.** When behaviors share a file, split them: a
   Hyprland module per feature with its own `require` line, a separate block per
   snippet. Two features must not write the same keys or lines.

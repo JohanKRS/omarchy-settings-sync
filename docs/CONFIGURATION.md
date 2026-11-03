@@ -54,8 +54,8 @@ version = 1
 id = "lock-shortcut"
 title = "Super+L locks the screen"
 summary = "Super+Ctrl+L toggles the workspace layout."
-group = "desktop"            # desktop, apps or system
-areas = ["hyprland"]
+app = "hyprland"             # the panel groups customizations by app
+areas = ["hyprland"]         # every area it touches
 default = "on"               # for other machines: on, off or ask
 when = ["command:hyprctl"]   # package:, command:, path:, omarchy>=4.1; ! negates
 
@@ -73,6 +73,24 @@ group = "desktop"
 kind = "json"
 dest = "~/.config/omarchy/shell.json"
 values = { "idle.screensaver" = 300, "idle.lock" = 600 }
+```
+
+Programs that are only installed or removed do not need a feature. List them
+under `[[program]]`; each one gets a simple switch in the **Programs** group:
+
+```toml
+[[program]]
+package = "papers"
+title = "Papers"
+
+[[program]]
+package = "libreoffice-fresh"
+title = "LibreOffice"
+action = "remove"
+
+[[program]]
+package = "artcraft-launcher"
+aur = true                   # installed by the agent with omarchy pkg aur add
 ```
 
 | Part kind | Applied by | Turning off |

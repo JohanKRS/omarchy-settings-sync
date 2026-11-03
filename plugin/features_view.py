@@ -7,7 +7,7 @@ import platform
 import time
 from pathlib import Path
 
-from gi.repository import GLib, Gtk, Pango
+from gi.repository import Gdk, GLib, Gtk, Pango
 
 from applier import Applier, Ledger, delegation, orphans, status
 import checkout
@@ -23,8 +23,30 @@ FILTER_LABELS = {"all": "All", "on": "On", "off": "Off", "new": "New", "pending"
                  "modified": "Edited locally", "unavailable": "Not applicable"}
 STATUS_LABELS = {"applied": "Applied", "pending": "Pending", "modified": "Edited locally", "off": "Off",
                  "new": "New", "unavailable": "Not applicable"}
-GROUP_LABELS = {"desktop": "Desktop", "apps": "Apps", "system": "System"}
-AREA_LABELS = {"hyprland": "Hyprland", "firefox": "Firefox", "shell": "Shell", "voxtype": "Voxtype", "mime": "MIME", "gtk": "GTK"}
+GROUP_LABELS = {"desktop": "Desktop", "apps": "Apps", "system": "System", "programs": "Programs"}
+AREA_LABELS = {"hyprland": "Hyprland", "firefox": "Firefox", "shell": "Shell", "voxtype": "Voxtype", "mime": "MIME",
+               "gtk": "GTK", "nautilus": "Nautilus", "steam": "Steam", "whatsapp": "WhatsApp", "papers": "Papers",
+               "tensaku": "Tensaku", "keystroke": "Keystroke", "claude": "Claude", "sddm": "SDDM"}
+APP_ICONS = {"nautilus": "org.gnome.Nautilus", "papers": "org.gnome.Papers", "hyprland": "preferences-desktop-display-symbolic",
+             "shell": "preferences-desktop-symbolic", "system": "preferences-system-symbolic",
+             "programs": "package-x-generic-symbolic"}
+
+
+def icon_name(*candidates):
+    """The first icon the active icon theme has, or None."""
+    display = Gdk.Display.get_default()
+    theme = Gtk.IconTheme.get_for_display(display) if display else None
+    return next((name for name in candidates if name and theme and theme.has_icon(name)), None)
+
+
+def group_key(feature):
+    return "programs" if feature.program else (feature.app or feature.group)
+
+
+def group_title(key):
+    if key in GROUP_LABELS:
+        return tr(GROUP_LABELS[key])
+    return AREA_LABELS.get(key, key.replace("-", " ").title())
 
 
 @dataclass
@@ -337,7 +359,8 @@ class FeaturesPage(Gtk.Box):
         groups = {}
         for feature in snapshot.features:
             label = snapshot.labels.get(feature.id, "off")
-            text = " ".join([feature.title, feature.summary, feature.id, *feature.areas]).casefold()
+            packages = [name for part in feature.parts for name in part.data.get("install", []) + part.data.get("remove", [])]
+            text = " ".join([feature.title, feature.summary, feature.id, feature.app, *feature.areas, *packages]).casefold()
             if query and query not in text:
                 continue
             on = self.effective(feature) == "on"
@@ -345,21 +368,28 @@ class FeaturesPage(Gtk.Box):
                 continue
             if wanted not in ("all", "on", "off") and label != wanted:
                 continue
-            groups.setdefault(feature.group, []).append(feature)
-        for group in GROUPS:
-            if group not in groups:
-                continue
+            groups.setdefault(group_key(feature), []).append(feature)
+        # Programs first, then one group per app, and system-wide settings last.
+        middle = sorted((key for key in groups if key not in ("programs", "system")), key=lambda k: group_title(k).casefold())
+        for group in [key for key in ("programs",) if key in groups] + middle + [key for key in ("system",) if key in groups]:
+            features = groups[group]
             heading = Gtk.Box(spacing=8)
             heading.add_css_class("feature-group-row")
-            name = Gtk.Label(label=tr(GROUP_LABELS[group]).upper(), xalign=0)
+            icon = (icon_name(APP_ICONS["programs"]) if group == "programs" else
+                    icon_name(*(f.icon for f in features), APP_ICONS.get(group), group))
+            if icon:
+                image = Gtk.Image.new_from_icon_name(icon)
+                image.add_css_class("feature-group-icon")
+                heading.append(image)
+            name = Gtk.Label(label=group_title(group).upper(), xalign=0)
             name.add_css_class("feature-group")
             heading.append(name)
-            count = Gtk.Label(label=str(len(groups[group])), xalign=0)
+            count = Gtk.Label(label=str(len(features)), xalign=0)
             count.add_css_class("feature-count")
             heading.append(count)
             self.listing.append(heading)
-            for feature in groups[group]:
-                self.listing.append(self.row(feature))
+            for feature in features:
+                self.listing.append(self.program_row(feature) if feature.program else self.row(feature))
         if not groups and snapshot.features:
             empty = Gtk.Label(label=tr('No customizations match.'), xalign=0)
             empty.add_css_class("muted")
@@ -386,7 +416,8 @@ class FeaturesPage(Gtk.Box):
         title.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         title.add_css_class("feature-title")
         texts.append(title)
-        details = [AREA_LABELS.get(area, area.capitalize()) for area in feature.areas]
+        # The group already names the app; list only the other areas it touches.
+        details = [AREA_LABELS.get(area, area.capitalize()) for area in feature.areas if area != group_key(feature)]
         if feature.needs_agent:
             details.append(tr('uses the agent'))
         if feature.needs_admin:
@@ -418,6 +449,43 @@ class FeaturesPage(Gtk.Box):
         chevron.add_controller(chevron_click)
         if open_:
             frame.append(self.details(feature))
+        return frame
+
+    def program_row(self, feature):
+        """A program is one switch: install or remove it on this machine, nothing else."""
+        label = self.snapshot.labels.get(feature.id, "off")
+        frame = Gtk.Box(spacing=10)
+        frame.add_css_class("feature-row")
+        frame.add_css_class("program-row")
+        if label == "unavailable":
+            frame.add_css_class("unavailable")
+        image = Gtk.Image.new_from_icon_name(icon_name(feature.icon, "package-x-generic-symbolic") or "package-x-generic-symbolic")
+        image.set_pixel_size(20)
+        image.add_css_class("program-icon")
+        frame.append(image)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        title = Gtk.Label(label=feature.title, xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        title.add_css_class("feature-title")
+        texts.append(title)
+        package = next(iter(feature.parts[0].data.get("install", []) + feature.parts[0].data.get("remove", [])),
+                       feature.id.removeprefix("program-"))
+        action = tr('Install') if feature.program == "install" else tr('Uninstall')
+        detail = [action, package] + (["AUR"] if feature.parts[0].agent else [])
+        if label == "unavailable":
+            detail = [tr('Not applicable here: {condition}', condition=self.snapshot.failing[feature.id])]
+        subtitle = Gtk.Label(label=" · ".join(detail), xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        subtitle.add_css_class("feature-subtitle")
+        subtitle.add_css_class("program-" + feature.program)
+        texts.append(subtitle)
+        frame.append(texts)
+        frame.append(self.status_widget("staged" if feature.id in self.staged else label))
+        switch = Gtk.Switch(valign=Gtk.Align.CENTER, active=self.effective(feature) == "on")
+        switch.set_sensitive(label != "unavailable" and not self.window.busy)
+        if label != "unavailable":
+            self.controls.append(switch)
+        switch.update_property([Gtk.AccessibleProperty.LABEL], [f"{action} {feature.title}"])
+        switch.connect("notify::active", lambda widget, _: self.toggled(feature, widget.get_active()))
+        frame.append(switch)
         return frame
 
     def status_widget(self, label):

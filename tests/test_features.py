@@ -166,6 +166,35 @@ class FeatureTest(unittest.TestCase):
         self.assertIsNone(probe.applicable(self.by_id['popups']))
         self.assertEqual(expand('${XDG_CONFIG_HOME:-$HOME/.config}/a'), self.home / '.config/a')
 
+    def test_programs_and_app_groups(self):
+        (self.repo / 'features.toml').write_text(CATALOG + '''
+[[program]]
+package = "papers"
+title = "Papers"
+
+[[program]]
+package = "libreoffice-fresh"
+action = "remove"
+
+[[program]]
+package = "artcraft-launcher"
+aur = true
+
+[[program]]
+package = "bad name"
+''')
+        features, errors = load_catalog(self.repo)
+        by_id = {f.id: f for f in features}
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(by_id['lock-shortcut'].app, 'hyprland')  # First area when no app is named.
+        papers = by_id['program-papers']
+        self.assertEqual((papers.program, papers.default, papers.parts[0].data['install']), ('install', 'ask', ['papers']))
+        self.assertEqual(by_id['program-libreoffice-fresh'].parts[0].data['remove'], ['libreoffice-fresh'])
+        self.assertTrue(by_id['program-artcraft-launcher'].parts[0].agent)
+        self.applier.finish([self.applier.enable(papers, {})])
+        self.assertEqual(len([call for call in self.run.calls if call[0] == 'pkexec']), 1)
+        self.assertEqual(self.ledger.part('program-papers', 'package:papers')['installed'], ['papers'])
+
     def test_catalog_rejects_unsafe_or_incomplete_parts(self):
         bad = [
             ('file', 'source = "../outside"\ndest = "~/.x"'),
