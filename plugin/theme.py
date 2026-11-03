@@ -28,6 +28,8 @@ def palette(directory=None):
         "foreground": color(surface.get("text"), color(colors.get("foreground"), "#cacccc")),
         "accent": color(colors.get("accent", colors.get("color4")), "#cacccc"),
         "urgent": color(colors.get("red", colors.get("color1")), "#a55555"),
+        "good": color(colors.get("green", colors.get("color2")), "#7fae7f"),
+        "warning": color(colors.get("yellow", colors.get("color3")), "#c9a554"),
         "font": shell.get("font", {}),
         "controls": shell.get("controls", shell.get("style", {})),
         "spacing": shell.get("spacing", {}),
@@ -56,6 +58,7 @@ class Theme:
             return True
         self.previous = values
         fg, bg, accent = values["foreground"], values["background"], values["accent"]
+        good, warning, urgent = values["good"], values["warning"], values["urgent"]
         fonts, controls = values["font"], values["controls"]
         size = max(1, int(fonts.get("body", fonts.get("base-size", 12))))
         title = max(1, int(fonts.get("title", round(size * 1.167))))
@@ -139,6 +142,35 @@ class Theme:
             textview text selection, entry selection {{ background: alpha({accent}, .35); }}
             .muted, .status {{ color: alpha({fg}, .65); opacity: 1; }}
             .panel {{ border: 1px solid alpha({fg}, .3); border-radius: {radius}px; padding: 14px; }}
+            .view-tabs {{ padding: 6px 14px 0; border-bottom: 1px solid alpha({fg}, .12); }}
+            .view-tabs button {{ background: transparent; border: none; border-radius: 0; box-shadow: none;
+                                 border-bottom: 2px solid transparent; padding: 4px 2px; margin-right: 16px;
+                                 color: alpha({fg}, .65); min-height: 24px; }}
+            .view-tabs button:hover {{ color: {fg}; background: transparent; }}
+            .view-tabs button:checked {{ color: {fg}; border-bottom-color: {accent}; background: transparent; }}
+            .feature-row {{ border: 1px solid alpha({fg}, .16); border-radius: {radius}px; padding: 10px 12px; }}
+            .feature-row.unavailable {{ opacity: .6; }}
+            .feature-title {{ font-weight: 600; }}
+            .feature-group {{ font-size: {max(1, size - 1)}px; font-weight: 600; color: alpha({fg}, .65); margin-top: 4px; }}
+            .feature-details {{ border-top: 1px solid alpha({fg}, .12); padding-top: 8px; }}
+            .feature-status {{ font-size: {max(1, size - 1)}px; padding: 1px 6px; border-radius: {radius}px; }}
+            .status-applied {{ color: {good}; }}
+            .status-pending, .status-staged {{ color: {warning}; }}
+            .status-modified {{ color: {urgent}; }}
+            .status-off, .status-unavailable {{ color: alpha({fg}, .55); }}
+            .status-new {{ color: {accent}; border: 1px solid alpha({accent}, .6); }}
+            switch {{ background: alpha({fg}, .12); border: 1px solid alpha({fg}, .4);
+                      border-radius: {radius}px; min-height: 20px; }}
+            switch:checked {{ background: alpha({accent}, .35); border-color: {accent}; }}
+            switch slider {{ background: alpha({fg}, .75); border-radius: {radius}px;
+                             min-width: 18px; min-height: 18px; box-shadow: none; }}
+            switch:checked slider {{ background: {accent}; }}
+            switch:disabled {{ opacity: .4; }}
+            radio {{ background: {bg}; border: 1px solid alpha({fg}, .4); }}
+            radio:checked {{ background: {accent}; color: {bg}; border-color: {accent}; }}
+            .features-banner {{ border: 1px solid alpha({warning}, .6); background: alpha({warning}, .08);
+                                border-radius: {radius}px; padding: 8px 10px; }}
+            .pending-bar {{ border-top: 1px solid alpha({fg}, .16); padding-top: 8px; }}
         """.encode())
         if self.window.vte:
             def rgba(value):

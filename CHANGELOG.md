@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Add a **Customizations** tab with a switch per customization saved in the
+  configuration repository, grouped by area, searchable and filterable by state.
+  Choices are staged until **Apply** and saved per machine under `machines/`.
+- Read customizations from a `features.toml` catalog. The panel applies and
+  reverts files, lines, marked blocks, JSON/INI/TOML keys, MIME defaults, user
+  services, system files and packages itself, with one password prompt, and
+  hands judgment steps and conflicts with local edits to the agent.
+- Turning a customization off returns it to the Omarchy default, keeps it as
+  it is, or restores the earlier backup. Optional parts have their own switch.
+- With a catalog, **Sync** applies what is on for this machine without
+  starting the agent unless needed. Repositories without a catalog keep the
+  agent-led Sync; **Create catalog** asks the agent to convert them.
+- Name this machine in Settings so a reinstall picks up its earlier choices.
+
 ## 0.1.13 — 2026-10-27
 
 - Browse and search local conversation history, then resume a native Codex or

@@ -84,6 +84,28 @@ repository instructions and scripts as code you are choosing to run. A
 successful conversation response is not independent evidence of a completed
 sync; inspect the reported validation and pending work.
 
+## Customizations catalog
+
+When the configuration repository has a `features.toml` catalog, the panel
+itself applies the simple parts of each customization. It only accepts these
+part kinds: whole files, lines, marked blocks, JSON/INI/TOML keys, MIME
+defaults and user services inside the home directory; system files under
+`/etc`, `/usr/lib`, `/usr/local` or `/opt`; and package install/remove lists.
+It never runs scripts from the repository. Sources must be regular files inside
+the repository and destinations are checked before anything is written.
+
+Administrator steps are collected into one generated script, run with `pkexec`
+so Omarchy's polkit prompt asks for the password once per Apply or Sync.
+Packages are removed without recursive dependency removal. Each change is
+recorded in a private per-machine ledger with what was there before, so a
+customization can be removed again exactly. A destination edited outside the
+plugin is never overwritten: it is handed to the agent as a conflict.
+
+The plugin keeps its own working copy of the configuration repository. It
+clones, fast-forwards and, with **Push changes** enabled, commits and pushes
+only this machine's `machines/<name>.toml`. It refuses to push when the working
+copy has other unpublished commits.
+
 ## Distribution
 
 Omarchy's updater follows the upstream Git branch. A marketplace review applies

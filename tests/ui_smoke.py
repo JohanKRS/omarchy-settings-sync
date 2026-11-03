@@ -795,6 +795,47 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert project_link.get_uri() == 'https://github.com/JohanKRS/omarchy-settings-sync'
         assert any(isinstance(w, Gtk.Label) and w.get_text() == 'v0.1.13' for w in widgets(project_link.get_parent()))
         window.setup_panel.destroy()
+        # Customizations tab: a local catalog renders, toggles stage, Apply
+        # records the machine choice and hands unfinished parts to the agent.
+        import subprocess
+        import features_view
+        from applier import Outcome
+        checkout_dir = Path(env["XDG_DATA_HOME"]) / "omarchy-agent-settings/workspace/repository"
+        checkout_dir.mkdir(parents=True, exist_ok=True)
+        (checkout_dir / "features.toml").write_text(
+            '[[feature]]\nid = "lock"\ntitle = "Super+L locks"\ngroup = "desktop"\n'
+            '[[feature.part]]\nkind = "agent"\ntitle = "Check"\ninstructions = "Do it"\n'
+            '[[feature]]\nid = "idle"\ntitle = "Idle"\ndefault = "ask"\n'
+            '[[feature.part]]\nkind = "agent"\ntitle = "Idle"\ninstructions = "Do it"\n')
+        subprocess.run(["git", "init", "-q", str(checkout_dir)], check=True)
+        subprocess.run(["git", "-C", str(checkout_dir), "remote", "add", "origin", window.settings["repository"]], check=True)
+        window.show_page("features")
+        page = window.features_page
+        wait(lambda: page.snapshot is not None and page.snapshot.features)
+        assert page.snapshot.labels == {"lock": "pending", "idle": "new"}, page.snapshot.labels
+        switches = [w for w in widgets(page.listing) if isinstance(w, Gtk.Switch)]
+        assert [s.get_active() for s in switches] == [True, False]
+        switches[1].set_active(True)
+        wait(lambda: page.bar.get_visible())
+        page.discard()
+        assert not page.bar.get_visible() and not page.staged
+        idle = next(f for f in page.snapshot.features if f.id == "idle")
+        page.toggled(idle, True)
+        wait(lambda: page.bar.get_visible())
+        def fake_run(win, snapshot, changes):
+            return [Outcome(feature, action, mode, delegated=[{"part": feature.parts[0], "action": action, "reason": "needs the agent"}])
+                    for feature, action, mode in changes]
+        window.publish.set_active(False)  # Never push from the fixture.
+        with patch.object(features_view, "run_changes", side_effect=fake_run), patch.object(window, "submit", return_value=True) as handoff, \
+                patch.object(features_view.checkout, "publish") as push:
+            page.apply_button.emit("clicked")
+            wait(lambda: handoff.called)
+            assert handoff.call_args.kwargs["features_task"].startswith("APLICAR")
+            assert "idle" in handoff.call_args.kwargs["features_task"]
+            push.assert_not_called()
+        assert 'idle = "on"' in (checkout_dir / f"machines/{page.snapshot.machine_name}.toml").read_text().replace('"idle"', "idle")
+        assert window.pages.get_visible_child_name() == "chat"
+        wait(lambda: not page.loading)
         window.close_client()
         with patch.object(window, "quit_if_idle") as cleanup:
             window.popup_key(None, Gdk.KEY_Escape, 0, 0)
@@ -824,4 +865,4 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         GLib.source_remove(window.theme_timer)
         GLib.source_remove(window.attention_timer)
         window.destroy()
-print("UI smoke passed: layout, questions, resume, cancellation, native queues and steering, acknowledgement races, all external queues, terminal, settings, dismissal")
+print("UI smoke passed: layout, questions, resume, cancellation, native queues and steering, acknowledgement races, all external queues, terminal, settings, customizations, dismissal")

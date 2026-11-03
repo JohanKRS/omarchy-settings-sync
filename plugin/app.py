@@ -35,6 +35,10 @@ from outbox import Outbox
 from chat_view import ChatView
 from message_view import MessageBody
 from activity_indicator import ActivityIndicator
+from applier import delegation
+import checkout
+from features import machine_name
+from features_view import FeaturesPage, changes_for_sync, collect, local_catalog, results_path, run_changes
 
 NATIVE_AGENTS = {"codex", "claude"}
 DIRECTION_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
@@ -277,11 +281,24 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.sync_button.connect("clicked", lambda *_: self.sync())
         header.append(self.sync_button)
         self.popup_card.append(header)
+        tabs = box(False, 0)
+        tabs.add_css_class("view-tabs")
+        self.chat_tab = Gtk.ToggleButton(label=tr('Conversation'), active=True)
+        self.features_tab = Gtk.ToggleButton(label=tr('Customizations'), group=self.chat_tab)
+        for name, tab in (("chat", self.chat_tab), ("features", self.features_tab)):
+            tab.connect("toggled", lambda widget, page=name: widget.get_active() and self.show_page(page))
+            tabs.append(tab)
+        self.popup_card.append(tabs)
         outer = box(spacing=10)
         for side in ("top", "bottom", "start", "end"):
             getattr(outer, "set_margin_" + side)(14)
-        self.main_content = outer
-        self.overlay = Gtk.Overlay(child=outer)
+        self.pages = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, transition_duration=120)
+        self.pages.add_named(outer, "chat")
+        self.features_page = FeaturesPage(self)
+        self.pages.add_named(self.features_page, "features")
+        self.features_pending = False
+        self.main_content = self.pages
+        self.overlay = Gtk.Overlay(child=self.pages)
         self.overlay.set_vexpand(True)
         self.popup_card.append(self.overlay)
         self.popup_canvas = Gtk.Fixed()
@@ -810,6 +827,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.spinner.set_spinning(working)
         self.update_queue()
         self.update_choices()
+        self.features_page.sync_sensitivity()
 
     def choices_available(self):
         return (self.agent() in NATIVE_AGENTS and bool(self.executables[self.agent()])
@@ -1235,9 +1253,75 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if not self.settings.get("repository"):
             self.setup()
             return
-        self.submit(tr('Sync'), sync=True)
+        if self.busy or self.terminal_pid or self.delivery_pending:
+            self.status.set_text(tr('Stop the current task first.'))
+            return
+        self.busy = True
+        self.status.set_text(tr('Checking the repository…'))
+        self.update_buttons()
+        def work():
+            snapshot = collect(self, fetch=True)
+            if not snapshot.catalog:
+                return snapshot, None
+            return snapshot, run_changes(self, snapshot, changes_for_sync(snapshot))
+        def done(result):
+            snapshot, outcomes = result
+            if outcomes is None:
+                # Repositories without a catalog keep the agent-led sync.
+                self.busy = False
+                self.submit(tr('Sync'), sync=True)
+                return
+            self.features_applied(snapshot, outcomes, snapshot.problem, sync=True)
+        self.worker(work, done)
 
-    def submit(self, text, sync=False, create=False, *, queued_entry=None, publish=None, review_existing=False, images=()):
+    def show_page(self, name):
+        self.pages.set_visible_child_name(name)
+        (self.chat_tab if name == "chat" else self.features_tab).set_active(True)
+        if name == "features":
+            self.features_page.refresh()
+        elif not self.panels:
+            self.input.grab_focus()
+
+    def features_applied(self, snapshot, outcomes, problem=None, sync=False):
+        """Report a plugin-side apply and hand anything left to the agent."""
+        self.busy = False
+        self.update_buttons()
+        if any(outcome.delegated or outcome.errors for outcome in outcomes) or (sync and snapshot.errors):
+            text = delegation(outcomes, results_path(self), machine=snapshot.machine_name,
+                              catalog_errors=snapshot.errors)
+            self.show_page("chat")
+            self.submit(tr('Finish applying customizations'), features_task=text)
+        else:
+            changed = sum(len(outcome.done) for outcome in outcomes)
+            message = (tr('Customizations applied.') if not sync else
+                       tr('Synced: {count} changes applied.', count=changed) if changed else tr('No changes.'))
+            if problem:
+                note = tr('Used the local copy: {problem}') if sync else tr('Not published: {problem}')
+                message += " " + note.format(problem=problem.splitlines()[0][:160])
+            self.status.set_text(message)
+        self.features_page.refresh()
+
+    def migrate_catalog(self):
+        self.show_page("chat")
+        self.submit(tr('Create the customizations catalog'), migrate=True)
+
+    def ask_agent_about_catalog(self, errors):
+        self.show_page("chat")
+        self.submit(tr('Fix the customizations catalog'), features_task=(
+            "CORRIGIR O CATÁLOGO DE CONFIGURAÇÕES. O plugin encontrou estes problemas em features.toml; "
+            "corrija o repositório seguindo a seção 'Catálogo de configurações' do procedimento e valide:\n"
+            + "\n".join(f"- {error}" for error in errors)))
+
+    def discuss_feature(self, feature):
+        self.show_page("chat")
+        buffer = self.input.get_buffer()
+        prefix = tr('About the customization “{title}” ({id}): ', title=feature.title, id=feature.id)
+        if not buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False).strip():
+            buffer.set_text(prefix)
+        self.input.grab_focus()
+
+    def submit(self, text, sync=False, create=False, *, queued_entry=None, publish=None, review_existing=False, images=(),
+               features_task=None, migrate=False):
         if self.busy or self.terminal_pid or self.delivery_pending:
             self.status.set_text(tr('Stop the current task first.'))
             return False
@@ -1263,7 +1347,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 sync=sync, publish=(self.publish.get_active() if publish is None else publish) or create, create=create,
                 review_existing=review_existing,
                 thread_id=self.thread_id if self.agent() in NATIVE_AGENTS else None,
-                locations=self.locations,
+                locations=self.locations, features_task=features_task, migrate=migrate,
+                machine=machine_name(self.settings),
+                checkout=checkout.location(self.locations["workspace"], self.settings["repository"]),
+                local_catalog=local_catalog(self),
             )
         except ValueError as error:
             self.failure(str(error))
@@ -1271,6 +1358,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.replay_context and not self.thread_id:
             prompt = transcript_context(self.replay_context) + prompt
         self.last_prompt = prompt
+        self.features_pending = bool(features_task or migrate or sync)
         self.stopping = False
         self.active_task = begin_task(
             self.locations, self.settings["repository"], self.settings.get("branch", ""),
@@ -1427,6 +1515,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.stopping = False
             self.update_buttons()
             self.save_settings()
+            if self.features_pending or self.pages.get_visible_child_name() == "features":
+                self.features_pending = False
+                self.features_page.refresh()
             self.drain_queue()
             GLib.idle_add(self.quit_if_idle)
         elif method == "client/disconnected":
@@ -1889,6 +1980,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
         branch = Gtk.Entry(placeholder_text=tr('Default branch'))
         branch.set_text(self.settings.get("branch", ""))
         content.append(self.control(tr('Branch'), branch))
+        machine = Gtk.Entry(placeholder_text=machine_name({}))
+        machine.set_text(self.settings.get("machine", ""))
+        machine.set_tooltip_text(tr('Customizations turned on or off here are saved under this name in the repository.'))
+        content.append(self.control(tr('Name of this machine'), machine))
         is_claude = self.agent() == 'claude'
         modes = list(CLAUDE_PERMISSION_MODES) if is_claude else ["auto", "ask", "read"]
         mode = dropdown([tr('Auto review'), tr('Ask for approval'), tr('Accept edits'), tr('Plan mode')]
@@ -1917,6 +2012,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
             if changed:
                 self.new_chat()
             self.settings.update(repository=value, branch=branch_value)
+            if machine.get_text().strip():
+                self.settings["machine"] = machine_name({"machine": machine.get_text().strip()})
+            else:
+                self.settings.pop("machine", None)
             if self.agent() in NATIVE_AGENTS:
                 self.settings['claude_permissions' if is_claude else 'permissions'] = modes[mode.get_selected()]
             self.thread_loaded = False
@@ -1961,7 +2060,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             version_row.append(footer)
             dialog.append(version_row)
         if locked:
-            for widget in (repository, branch, mode, existing, create):
+            for widget in (repository, branch, machine, mode, existing, create):
                 widget.set_sensitive(False)
             error_label.set_text(tr('Finish the task and send or remove queued messages before changing settings.'))
             error_label.set_visible(True)

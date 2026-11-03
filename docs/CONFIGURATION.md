@@ -38,6 +38,79 @@ next to the component they configure. In `SYNC.md`, document:
 - Hardware requirements, optional components and machine-specific overrides.
 - How to undo the change using the local backup.
 
+## Customizations catalog
+
+A `features.toml` file at the root turns each customization into a switch in
+the panel's **Customizations** tab. Each machine turns features on or off
+independently, and Sync applies only what is on for that machine. In a
+repository without a catalog, the tab offers **Create catalog**, which asks the
+agent to convert the existing inventory; afterwards the agent keeps the catalog current whenever it creates
+or changes a setting.
+
+```toml
+version = 1
+
+[[feature]]
+id = "lock-shortcut"
+title = "Super+L locks the screen"
+summary = "Super+Ctrl+L toggles the workspace layout."
+group = "desktop"            # desktop, apps or system
+areas = ["hyprland"]
+default = "on"               # for other machines: on, off or ask
+when = ["command:hyprctl"]   # package:, command:, path:, omarchy>=4.1; ! negates
+
+[[feature.part]]
+kind = "block"
+dest = "~/.config/hypr/bindings.lua"
+source = "desktop/hyprland/lock-bindings.lua"
+
+[[feature]]
+id = "idle-timers"
+title = "Screensaver after 5 minutes, lock after 10"
+group = "desktop"
+
+[[feature.part]]
+kind = "json"
+dest = "~/.config/omarchy/shell.json"
+values = { "idle.screensaver" = 300, "idle.lock" = 600 }
+```
+
+| Part kind | Applied by | Turning off |
+| --- | --- | --- |
+| `file` | Plugin | Restores the Omarchy default or deletes the file it created |
+| `line`, `block` | Plugin, inside markers | Removes the line or block |
+| `json`, `ini` (`format = "toml"` for simple TOML), `mime` | Plugin | Returns each key to the Omarchy default or its previous value |
+| `user-service` | Plugin | Disables the unit if the plugin enabled it |
+| `system-file`, `package` | Plugin, one password prompt | Removes the file or restores the backup; restores base packages |
+| `agent` | The agent, with `instructions` | The agent, with the recorded state |
+
+Optional parts have an `id` and `optional = true` and get their own switch.
+When turning a feature off you can return to the Omarchy default, stop syncing
+and keep the current state, or restore the backup taken before it was first
+applied. A destination edited outside the plugin is shown as **Edited locally**
+and is never overwritten; the agent reconciles it.
+
+Choices are stored in `machines/<name>.toml`. The name defaults to the
+hostname and can be changed in Settings, so a reinstalled machine with the same
+name picks up its previous choices:
+
+```toml
+name = "desktop"
+
+[features]
+"printing-filter" = "off"
+
+[off]
+"lock-shortcut" = "keep"     # default, keep or previous
+
+[parts]
+"firefox-popups.profile-module" = "off"
+```
+
+Validate a catalog with `python3 plugin/features.py validate <repository>`.
+Customizations saved with **Push changes** disabled go to a local catalog on
+that machine and are marked **this machine only**.
+
 ## What to share
 
 Share preferences that make sense on another installation: application settings,

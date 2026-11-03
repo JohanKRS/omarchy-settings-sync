@@ -45,6 +45,21 @@ Examples use synthetic data.
    preserves local changes, adapts hardware-specific settings, and applies and
    tests compatible components. Repeat Sync when you want to receive updates.
 
+### Turn customizations on or off per machine
+
+The **Customizations** tab lists every setting saved in your repository, with
+a switch and its state on this machine. Settings that span several apps, such
+as a Hyprland rule plus a Firefox module, switch as one. Changes are staged
+until **Apply**; turning one off can return it to the Omarchy default, keep it
+as it is, or restore the earlier backup. The panel applies files, snippets,
+keys, MIME defaults, services and packages itself, asking for the administrator
+password once when needed, and calls the agent only for steps that need its
+judgment or for conflicts with local edits. See the
+[customizations catalog](docs/CONFIGURATION.md#customizations-catalog).
+
+Repositories created before the catalog keep the agent-led Sync. Use
+**Customizations → Create catalog** to convert one.
+
 This is an agent-assisted, on-demand workflow. It does not continuously mirror
 files or run a background sync daemon. The [sync workflow](plugin/WORKFLOW.md)
 instructs the agent to make backups, resolve conflicts with you and record the
@@ -88,7 +103,8 @@ URL. An empty branch uses the repository's default branch. See the
 | --- | --- |
 | Settings icon, left click | Open or hide the panel; reveal a pending question |
 | Settings icon, right click | No action |
-| **Sync** | Ask the agent to sync the configured repository onto this installation |
+| **Sync** | Apply the repository's customizations that are on for this machine; without a catalog, ask the agent to sync |
+| **Conversation / Customizations** tabs | Talk to the agent, or switch individual customizations on and off for this machine |
 | Message field | Request a specific change; optionally publish its reusable configuration |
 | **Enter / Send / Queue** | The same button sends when idle and queues while an agent is working |
 | Queue above the message field | Compact one-line previews with **Direct now / Send now**, **Edit** and **Remove** icons; pause/resume beside the count |
@@ -260,6 +276,7 @@ filenames. Other CLIs keep their own naming behavior.
 | `~/.local/state/omarchy-agent-settings/attachments/` | Private pasted PNG images; retained until local state is removed |
 | `~/.local/state/omarchy-agent-settings/outbox.json` | Unsent follow-ups, including messages with unconfirmed delivery |
 | `~/.local/share/omarchy-agent-settings/workspace/` | Working copies of configuration repositories |
+| `~/.local/state/omarchy-agent-settings/repositories/<id>/applied.json` | What the panel applied on this machine, for exact removal |
 
 The corresponding `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_DATA_HOME` overrides
 are supported. These files are not part of the plugin repository. Your agent

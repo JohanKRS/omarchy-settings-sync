@@ -40,6 +40,10 @@ and 3.14; graphical and shell integration checks require an Omarchy session.
 - `plugin/claude_client.py` adapts Claude's bidirectional stream protocol.
 - `plugin/catalog.py` queries model metadata without starting a conversation.
 - `plugin/context.py` tracks local sync activity and repository identity.
+- `plugin/features.py` reads and validates the customizations catalog and
+  machine choices; `plugin/applier.py` applies and reverts catalog parts with a
+  per-machine ledger; `plugin/checkout.py` manages the plugin's working copy;
+  `plugin/features_view.py` builds the Customizations tab.
 - `plugin/message_markup.py` parses Markdown and restricts inline markup/links;
   `plugin/message_view.py` builds the native message widgets. The pinned parser
   and its update instructions are in `plugin/_vendor/`.
