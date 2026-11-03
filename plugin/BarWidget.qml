@@ -127,13 +127,14 @@ Ui.BarWidget {
         height: 24
         scale: syncGlyph.drawSize / 24
         transformOrigin: Item.TopLeft
-        preferredRendererType: Shape.CurveRenderer
+        preferredRendererType: Shape.GeometryRenderer
+        antialiasing: true
 
         ShapePath {
           fillColor: syncGlyph.tint
           strokeColor: "transparent"
           strokeWidth: -1
-          PathSvg { path: "M2 15V5h16.59l-3-3L17 .59 23.41 7H4v8zM22 9v10H5.41l3 3L7 23.41.59 17H20V9zM12 9h6v6h-6z" }
+          PathSvg { path: "M2.25 14.75V4.75h15.23l-2.25-2.25L17 .73l6.52 6.52H4.75v7.5zM21.75 9.25v10H6.52l2.25 2.25L7 23.27.48 16.75h18.77v-7.5zM12 9.25h5.5v5.5H12z" }
         }
       }
 
