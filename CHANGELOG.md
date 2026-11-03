@@ -16,8 +16,9 @@
   agent-led Sync; **Create catalog** asks the agent to convert them.
 - Manage machines from the Customizations tab: list, rename, remove or create
   one, and link a reinstalled installation to its earlier machine or start it
-  fresh with the catalog defaults. Sync waits until a new installation is
-  linked.
+  fresh. Sync waits until a new installation is linked. New and fresh machines
+  install nothing until you choose: every customization starts as **New**, with
+  **Turn all on** and **Turn all off** shortcuts.
 
 ## 0.1.13 — 2026-10-27
 

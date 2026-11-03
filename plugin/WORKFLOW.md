@@ -157,8 +157,10 @@ simple parts itself and sends you only what needs judgment or a conflict.
   listed in `install/omarchy-base.packages`. Do not rely on other cleanup.
 - **Machine choices** live in `machines/<name>.toml`: `[features]` with
   `"on"`/`"off"`, `[off]` with `"keep"` or `"previous"`, and `[parts]` with
-  `"<feature>.<part id>" = "off"`. Set a feature you create here to `"on"` for
-  this machine only. Do not edit other machines' files unless asked. The panel
+  `"<feature>.<part id>" = "off"`. A machine without a file, or with
+  `defaults = "ask"`, is new: features it has not chosen stay off and appear as
+  new until the user turns them on. Set a feature you create here to `"on"`
+  for this machine only. Do not edit other machines' files unless asked. The panel
   renames, removes and links machines; keep `name` equal to the file name.
 - **Local only.** With publishing disabled, add the feature to the local
   catalog named in the request (sources in a `local/` folder beside it), not
@@ -175,8 +177,8 @@ simple parts itself and sends you only what needs judgment or a conflict.
 To create the catalog for an existing repository, convert every component
 of the inventory, split shared files without changing behavior, apply the
 split locally and validate it, and record this machine's current state in
-its machine file: `on` for what is applied, `off` for what is not or does not
-apply here.
+its machine file, with an explicit `on` for what is applied and `off` for what
+is not or does not apply here.
 
 ## Publication and data
 

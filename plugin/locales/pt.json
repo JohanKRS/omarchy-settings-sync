@@ -232,11 +232,14 @@
   "A machine with this name already exists.": "Já existe uma máquina com esse nome.",
   "Choose which machine this installation is, then sync again.": "Escolha qual máquina é esta instalação e sincronize de novo.",
   "Machine not chosen yet": "Máquina ainda não escolhida",
-  "Start {name} over as a new machine? Its saved choices return to the catalog defaults.": "Começar {name} do zero, como uma máquina nova? As escolhas salvas dela voltam aos padrões do catálogo.",
   "Start fresh": "Começar do zero",
   "Use its choices here": "Usar as escolhas dela aqui",
   "Use this name on this installation, without its earlier choices.": "Usar este nome nesta instalação, sem as escolhas anteriores.",
   "This installation starts as a new machine. Review the customizations, then sync.": "Esta instalação começa como uma máquina nova. Revise as personalizações e depois sincronize.",
   "Each installation uses the choices of one machine. After reinstalling, use the same machine to get its choices back, or start it fresh.": "Cada instalação usa as escolhas de uma máquina. Depois de formatar, use a mesma máquina para recuperar as escolhas dela, ou comece do zero.",
-  "Use this name": "Usar este nome"
+  "Use this name": "Usar este nome",
+  "Start {name} over as a new machine? Its saved choices are cleared and nothing is applied until you choose.": "Começar {name} do zero, como uma máquina nova? As escolhas salvas são apagadas e nada é aplicado até você escolher.",
+  "Turn all on": "Ligar todas",
+  "Turn all off": "Desligar todas",
+  "{count} customizations are waiting for your choice. Nothing is installed until you turn them on and apply.": "{count} personalizações esperam sua escolha. Nada é instalado até você ligar e aplicar."
 }

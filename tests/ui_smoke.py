@@ -812,9 +812,10 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         window.show_page("features")
         page = window.features_page
         wait(lambda: page.snapshot is not None and page.snapshot.features)
-        assert page.snapshot.labels == {"lock": "pending", "idle": "new"}, page.snapshot.labels
+        # No machine file yet: a new installation applies nothing until chosen.
+        assert page.snapshot.labels == {"lock": "new", "idle": "new"}, page.snapshot.labels
         switches = [w for w in widgets(page.listing) if isinstance(w, Gtk.Switch)]
-        assert [s.get_active() for s in switches] == [True, False]
+        assert [s.get_active() for s in switches] == [False, False]
         switches[1].set_active(True)
         wait(lambda: page.bar.get_visible())
         page.discard()
@@ -855,7 +856,13 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         page.machine_action(content, "fresh", other)
         wait(lambda: window.settings.get("machine") == other and not page.loading)
         fresh = (checkout_dir / f"machines/{other}.toml").read_text()
-        assert "idle" not in fresh and "old-install" not in fresh, fresh
+        assert "idle" not in fresh and "old-install" not in fresh and 'defaults = "ask"' in fresh, fresh
+        wait(lambda: page.snapshot.machine_name == other and not page.loading)
+        assert set(page.snapshot.labels.values()) == {"new"}, page.snapshot.labels
+        assert page.undecided.get_visible()
+        page.decide_new("on")
+        assert {e["state"] for e in page.staged.values()} == {"on"} and page.bar.get_visible()
+        page.discard()
         page.show_machines()
         page.machine_action(content, "use", "work-laptop")
         wait(lambda: window.settings.get("machine") == "work-laptop" and not page.loading)

@@ -59,7 +59,8 @@ judgment or for conflicts with local edits. See the
 
 **Manage machines** renames or removes machines in the repository. After a
 reinstall, the tab asks which machine this installation is: bring back its
-earlier choices, or start it fresh as a new machine.
+earlier choices, or start it fresh. A new or fresh machine installs nothing
+until you pick which customizations to turn on.
 
 Repositories created before the catalog keep the agent-led Sync. Use
 **Customizations → Create catalog** to convert one.

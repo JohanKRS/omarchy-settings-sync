@@ -96,8 +96,9 @@ repository with its hostname, Omarchy version and last update, and lets you
 rename or remove one, create a new one, or link this installation to an
 existing machine. After a reinstall the tab asks which machine the new
 installation is: use its previous choices, or **Start fresh** to keep the name
-but begin with the catalog defaults, as a new machine would. Sync waits for
-that answer. A short, non-reversible id derived from `/etc/machine-id` tells a new
+but clear its choices. Sync waits for that answer. A new or fresh machine
+installs nothing by itself: every customization starts as **New** until you
+turn it on, one by one or with **Turn all on**, and apply. A short, non-reversible id derived from `/etc/machine-id` tells a new
 installation apart from the old one without publishing the machine id:
 
 ```toml

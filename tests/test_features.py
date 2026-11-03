@@ -184,7 +184,8 @@ class FeatureTest(unittest.TestCase):
                 self.assertTrue(errors)
 
     def test_machine_choices_round_trip_and_defaults(self):
-        record = {'features': {'idle': 'on', 'pdf': 'off'}, 'off': {'pdf': 'keep'}, 'parts': {'popups.profile': 'off'}}
+        record = {'features': {'idle': 'on', 'pdf': 'off'}, 'off': {'pdf': 'keep'}, 'parts': {'popups.profile': 'off'},
+                  'defaults': 'catalog'}
         machine_path(self.repo, 'desk').parent.mkdir()
         machine_path(self.repo, 'desk').write_text(machine_text('desk', record, hostname='desk', omarchy='4.0.6-1'))
         loaded = load_machine(self.repo, 'desk')
@@ -192,12 +193,20 @@ class FeatureTest(unittest.TestCase):
         self.assertEqual(desired(self.by_id['idle'], loaded), 'on')
         self.assertEqual(desired(self.by_id['idle'], {}), 'new')
         self.assertEqual(desired(self.by_id['lock-shortcut'], {}), 'on')
+        # A new machine (no file yet, or started fresh) applies nothing until chosen.
+        fresh = load_machine(self.repo, 'never-saved')
+        self.assertEqual(fresh['defaults'], 'ask')
+        self.assertEqual({f.id: desired(f, fresh) for f in self.features},
+                         {f.id: 'new' for f in self.features})
+        machine_path(self.repo, 'clean').write_text(machine_text('clean', fresh))
+        self.assertEqual(load_machine(self.repo, 'clean')['defaults'], 'ask')
+        self.assertEqual(desired(self.by_id['lock-shortcut'], {**fresh, 'features': {'lock-shortcut': 'on'}}), 'on')
         profile = self.by_id['popups'].parts[2]
         self.assertFalse(part_enabled(self.by_id['popups'], profile, loaded))
 
     def test_machines_can_be_listed_renamed_and_removed(self):
         (self.repo / 'machines').mkdir()
-        record = {'features': {'idle': 'on', 'pdf': 'off'}, 'off': {}, 'parts': {}}
+        record = {'features': {'idle': 'on', 'pdf': 'off'}, 'off': {}, 'parts': {}, 'defaults': 'catalog'}
         machine_path(self.repo, 'omarchy').write_text(
             machine_text('omarchy', record, hostname='omarchy', omarchy='4.0.6-1', install='abc'))
         machine_path(self.repo, 'laptop').write_text(machine_text('laptop', {}, hostname='laptop'))

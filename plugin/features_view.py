@@ -182,6 +182,18 @@ class FeaturesPage(Gtk.Box):
         self.banner_button.connect("clicked", lambda *_: self.banner_action())
         self.banner.append(self.banner_button)
         self.append(self.banner)
+        self.undecided = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
+        self.undecided.add_css_class("features-banner")
+        self.undecided_text = Gtk.Label(xalign=0, wrap=True)
+        self.undecided_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.undecided.append(self.undecided_text)
+        choices = Gtk.Box(spacing=6)
+        for label, state in ((tr('Turn all on'), "on"), (tr('Turn all off'), "off")):
+            button = Gtk.Button(label=label)
+            button.connect("clicked", lambda *_, value=state: self.decide_new(value))
+            choices.append(button)
+        self.undecided.append(choices)
+        self.append(self.undecided)
         self.listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroll.set_child(self.listing)
@@ -271,6 +283,10 @@ class FeaturesPage(Gtk.Box):
             self.show_banner(tr('Showing the local copy. {problem}', problem=snapshot.problem), None)
         else:
             self.show_banner("", None)
+        undecided = [f for f in snapshot.features if snapshot.labels.get(f.id) == "new" and f.id not in self.staged]
+        self.undecided.set_visible(bool(undecided) and not snapshot.binding_needed)
+        self.undecided_text.set_text(tr('{count} customizations are waiting for your choice. Nothing is installed until you turn them on and apply.',
+                                        count=len(undecided)))
         query = self.search.get_text().casefold().strip()
         wanted = FILTERS[self.filter.get_selected()] if self.filter.get_selected() < len(FILTERS) else "all"
         groups = {}
@@ -434,6 +450,12 @@ class FeaturesPage(Gtk.Box):
             if self.snapshot.ledger.applied(feature.id):
                 self.expanded.add(feature.id)
         GLib.idle_add(self.render)
+
+    def decide_new(self, state):
+        for feature in self.snapshot.features:
+            if self.snapshot.labels.get(feature.id) == "new" and feature.id not in self.staged:
+                self.stage(feature, state=state)
+        self.render()
 
     def part_toggled(self, feature, key, active):
         parts = dict(self.staged.get(feature.id, {}).get("parts", {}))
@@ -600,7 +622,7 @@ class FeaturesPage(Gtk.Box):
             elif confirming and confirming[1] == name:
                 kind = confirming[0]
                 text = (tr('Remove {name} from the repository?', name=name) if kind == "remove" else
-                        tr('Start {name} over as a new machine? Its saved choices return to the catalog defaults.', name=name))
+                        tr('Start {name} over as a new machine? Its saved choices are cleared and nothing is applied until you choose.', name=name))
                 question = Gtk.Label(label=text, xalign=0, wrap=True)
                 row.append(question)
                 confirm = Gtk.Button(label=tr('Remove') if kind == "remove" else tr('Start fresh'))
@@ -670,7 +692,7 @@ class FeaturesPage(Gtk.Box):
             elif action in ("create", "fresh"):
                 path = machine_path(snapshot.checkout, target)
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(machine_text(target, {}, hostname=platform.node(), omarchy=Probe().omarchy(),
+                path.write_text(machine_text(target, {"defaults": "ask"}, hostname=platform.node(), omarchy=Probe().omarchy(),
                                              updated=GLib.DateTime.new_now_utc().format_iso8601(), install=install_id()))
                 paths = [path]
             if not paths or not publish:

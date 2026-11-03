@@ -382,15 +382,17 @@ def remove_machine(repository, name):
 
 
 def load_machine(repository, name):
-    record = {"features": {}, "off": {}, "parts": {}}
+    """A machine without a file is new: nothing is applied until the user picks."""
+    record = {"features": {}, "off": {}, "parts": {}, "defaults": "ask"}
     try:
         data = tomllib.loads(machine_path(repository, name).read_text())
     except (OSError, ValueError):
         return record
-    for table in record:
+    for table in ("features", "off", "parts"):
         values = data.get(table, {})
         if isinstance(values, dict):
             record[table] = {str(k): str(v) for k, v in values.items() if isinstance(v, str)}
+    record["defaults"] = "ask" if data.get("defaults") == "ask" else "catalog"
     return record
 
 
@@ -404,6 +406,9 @@ def machine_text(name, record, *, hostname="", omarchy="", updated="", install="
     for key, value in (("hostname", hostname), ("omarchy", omarchy), ("updated", updated), ("install", install)):
         if value:
             lines.append(f"{key} = {_toml_string(value)}")
+    if record.get("defaults") == "ask":
+        # Undecided features stay off here until chosen, as on a clean install.
+        lines.append('defaults = "ask"')
     for table in ("features", "off", "parts"):
         values = record.get(table, {})
         if values:
@@ -416,6 +421,8 @@ def desired(feature, machine):
     choice = machine.get("features", {}).get(feature.id)
     if choice in ("on", "off"):
         return choice
+    if machine.get("defaults") == "ask" and feature.default == "on":
+        return "new"
     return {"on": "on", "off": "off", "ask": "new"}[feature.default]
 
 
