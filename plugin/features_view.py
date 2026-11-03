@@ -169,38 +169,42 @@ class FeaturesPage(Gtk.Box):
         self.filter = Gtk.DropDown.new_from_strings([tr(FILTER_LABELS[key]) for key in FILTERS])
         self.filter.connect("notify::selected", lambda *_: self.render())
         tools.append(self.filter)
-        main.append(tools)
-        machine_row = Gtk.Box(spacing=8)
-        self.machine_label = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
-        self.machine_label.add_css_class("muted")
-        machine_row.append(self.machine_label)
-        self.machines_button = Gtk.Button(label=tr('Manage machines'))
-        self.machines_button.add_css_class("flat")
+        machine = Gtk.Box(spacing=6)
+        machine.append(Gtk.Image.new_from_icon_name("computer-symbolic"))
+        self.machine_label = Gtk.Label(ellipsize=Pango.EllipsizeMode.END, max_width_chars=12)
+        machine.append(self.machine_label)
+        self.machines_button = Gtk.Button(child=machine, tooltip_text=tr('Manage machines'))
+        self.machines_button.add_css_class("machine-button")
+        self.machines_button.update_property([Gtk.AccessibleProperty.LABEL], [tr('Manage machines')])
         self.machines_button.connect("clicked", lambda *_: self.show_machines())
-        machine_row.append(self.machines_button)
-        main.append(machine_row)
+        tools.append(self.machines_button)
+        main.append(tools)
         self.banner = Gtk.Box(spacing=8, visible=False)
         self.banner.add_css_class("features-banner")
         self.banner_text = Gtk.Label(xalign=0, wrap=True, hexpand=True)
         self.banner_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self.banner.append(self.banner_text)
         self.banner_button = Gtk.Button(valign=Gtk.Align.CENTER)
+        self.banner_button.add_css_class("flat")
+        self.banner_button.add_css_class("link-action")
         self.banner_button.connect("clicked", lambda *_: self.banner_action())
         self.banner.append(self.banner_button)
         main.append(self.banner)
-        self.undecided = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
-        self.undecided.add_css_class("features-banner")
-        self.undecided_text = Gtk.Label(xalign=0, wrap=True)
+        self.undecided = Gtk.Box(spacing=4, visible=False)
+        self.undecided.add_css_class("features-notice")
+        self.undecided_text = Gtk.Label(xalign=0, hexpand=True, wrap=True)
         self.undecided_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.undecided_text.set_tooltip_text(tr('Nothing is installed until you turn customizations on and apply.'))
         self.undecided.append(self.undecided_text)
-        choices = Gtk.Box(spacing=6)
         for label, state in ((tr('Turn all on'), "on"), (tr('Turn all off'), "off")):
-            button = Gtk.Button(label=label)
+            button = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
+            button.add_css_class("flat")
+            button.add_css_class("link-action")
             button.connect("clicked", lambda *_, value=state: self.decide_new(value))
-            choices.append(button)
-        self.undecided.append(choices)
+            self.undecided.append(button)
         main.append(self.undecided)
         self.listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.listing.set_margin_end(10)  # Keep text clear of the overlay scrollbar.
         scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroll.set_child(self.listing)
         main.append(scroll)
@@ -210,6 +214,7 @@ class FeaturesPage(Gtk.Box):
         self.bar_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self.bar.append(self.bar_text)
         discard = Gtk.Button(label=tr('Discard'), valign=Gtk.Align.CENTER)
+        discard.add_css_class("flat")
         discard.connect("clicked", lambda *_: self.discard())
         self.bar.append(discard)
         self.apply_button = Gtk.Button(label=tr('Apply'), valign=Gtk.Align.CENTER)
@@ -230,6 +235,7 @@ class FeaturesPage(Gtk.Box):
         header.append(heading)
         machines.append(header)
         self.machines_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.machines_content.set_margin_end(10)
         machines_scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         machines_scroll.set_child(self.machines_content)
         machines.append(machines_scroll)
@@ -252,7 +258,6 @@ class FeaturesPage(Gtk.Box):
                 self.show_banner(tr('Choose a configuration repository in Settings.'), None)
             return
         self.loading = True
-        self.machine_label.set_text(tr('Loading customizations…'))
         def done(snapshot):
             self.loading = False
             self.snapshot = snapshot
@@ -291,8 +296,7 @@ class FeaturesPage(Gtk.Box):
         if not snapshot:
             return
         machine = snapshot.machine_name
-        self.machine_label.set_text(tr('Machine not chosen yet') if snapshot.binding_needed
-                                    else tr('On this machine: {name}', name=machine))
+        self.machine_label.set_text("—" if snapshot.binding_needed else machine)
         self.machines_button.set_sensitive(bool(snapshot.checkout))
         if snapshot.binding_needed:
             self.show_banner(tr('This installation is not linked to a machine yet. Choose one to reuse its choices, or create a new one.'),
@@ -310,8 +314,7 @@ class FeaturesPage(Gtk.Box):
             self.show_banner("", None)
         undecided = [f for f in snapshot.features if snapshot.labels.get(f.id) == "new" and f.id not in self.staged]
         self.undecided.set_visible(bool(undecided) and not snapshot.binding_needed)
-        self.undecided_text.set_text(tr('{count} customizations are waiting for your choice. Nothing is installed until you turn them on and apply.',
-                                        count=len(undecided)))
+        self.undecided_text.set_text(tr('{count} waiting for your choice', count=len(undecided)))
         query = self.search.get_text().casefold().strip()
         wanted = FILTERS[self.filter.get_selected()] if self.filter.get_selected() < len(FILTERS) else "all"
         groups = {}
@@ -329,8 +332,14 @@ class FeaturesPage(Gtk.Box):
         for group in GROUPS:
             if group not in groups:
                 continue
-            heading = Gtk.Label(label=tr(GROUP_LABELS[group]).upper(), xalign=0)
-            heading.add_css_class("feature-group")
+            heading = Gtk.Box(spacing=8)
+            heading.add_css_class("feature-group-row")
+            name = Gtk.Label(label=tr(GROUP_LABELS[group]).upper(), xalign=0)
+            name.add_css_class("feature-group")
+            heading.append(name)
+            count = Gtk.Label(label=str(len(groups[group])), xalign=0)
+            count.add_css_class("feature-count")
+            heading.append(count)
             self.listing.append(heading)
             for feature in groups[group]:
                 self.listing.append(self.row(feature))
@@ -343,11 +352,18 @@ class FeaturesPage(Gtk.Box):
     def row(self, feature):
         snapshot = self.snapshot
         label = snapshot.labels.get(feature.id, "off")
+        open_ = feature.id in self.expanded
         frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         frame.add_css_class("feature-row")
+        if open_:
+            frame.add_css_class("expanded")
         if label == "unavailable":
             frame.add_css_class("unavailable")
         head = Gtk.Box(spacing=10)
+        chevron = Gtk.Image.new_from_icon_name("pan-down-symbolic" if open_ else "pan-end-symbolic")
+        chevron.add_css_class("feature-chevron")
+        chevron.set_valign(Gtk.Align.START)
+        head.append(chevron)
         texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
         title = Gtk.Label(label=feature.title, xalign=0, wrap=True)
         title.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
@@ -365,14 +381,10 @@ class FeaturesPage(Gtk.Box):
         if details:
             subtitle = Gtk.Label(label=" · ".join(details), xalign=0, wrap=True)
             subtitle.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            subtitle.add_css_class("muted")
+            subtitle.add_css_class("feature-subtitle")
             texts.append(subtitle)
         head.append(texts)
-        staged = feature.id in self.staged
-        badge = Gtk.Label(label=tr('Changed') if staged else tr(STATUS_LABELS[label]), valign=Gtk.Align.CENTER)
-        badge.add_css_class("feature-status")
-        badge.add_css_class("status-" + ("staged" if staged else label))
-        head.append(badge)
+        head.append(self.status_widget("staged" if feature.id in self.staged else label))
         switch = Gtk.Switch(valign=Gtk.Align.CENTER, active=self.effective(feature) == "on")
         switch.set_sensitive(label != "unavailable" and not self.window.busy)
         if label != "unavailable":
@@ -384,10 +396,28 @@ class FeaturesPage(Gtk.Box):
         click = Gtk.GestureClick()
         click.connect("released", lambda *_: self.toggle_details(feature))
         texts.add_controller(click)
-        revealer = Gtk.Revealer(reveal_child=feature.id in self.expanded)
-        revealer.set_child(self.details(feature))
-        frame.append(revealer)
+        chevron_click = Gtk.GestureClick()
+        chevron_click.connect("released", lambda *_: self.toggle_details(feature))
+        chevron.add_controller(chevron_click)
+        if open_:
+            frame.append(self.details(feature))
         return frame
+
+    def status_widget(self, label):
+        text = tr('Changed') if label == "staged" else tr(STATUS_LABELS[label])
+        if label == "new":
+            pill = Gtk.Label(label=text, valign=Gtk.Align.CENTER)
+            pill.add_css_class("feature-pill")
+            return pill
+        status = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
+        dot = Gtk.Label(label="●")
+        dot.add_css_class("status-dot")
+        dot.add_css_class("status-" + label)
+        status.append(dot)
+        words = Gtk.Label(label=text)
+        words.add_css_class("feature-status")
+        status.append(words)
+        return status
 
     def details(self, feature):
         snapshot = self.snapshot
@@ -395,8 +425,12 @@ class FeaturesPage(Gtk.Box):
         content.add_css_class("feature-details")
         if feature.summary:
             summary = Gtk.Label(label=feature.summary, xalign=0, wrap=True)
-            summary.add_css_class("muted")
+            summary.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            summary.add_css_class("feature-subtitle")
             content.append(summary)
+        parts = Gtk.Label(label=tr('Parts'), xalign=0)
+        parts.add_css_class("feature-section")
+        content.append(parts)
         states = snapshot.states.get(feature.id, {})
         staged_parts = self.staged.get(feature.id, {}).get("parts", {})
         for part in feature.parts:
@@ -409,7 +443,7 @@ class FeaturesPage(Gtk.Box):
             if state in ("modified", "missing", "outdated"):
                 who = tr(STATUS_LABELS["modified" if state == "modified" else "pending"]) + " · " + who
             hint = Gtk.Label(label=who)
-            hint.add_css_class("muted")
+            hint.add_css_class("feature-subtitle")
             line.append(hint)
             if part.optional:
                 key = f"{feature.id}.{part.data['id']}"
@@ -420,8 +454,8 @@ class FeaturesPage(Gtk.Box):
                 toggle.connect("notify::active", lambda widget, _, k=key: self.part_toggled(feature, k, widget.get_active()))
                 line.append(toggle)
             content.append(line)
-        off = Gtk.Label(label=tr('When turned off on this machine:'), xalign=0)
-        off.add_css_class("feature-group")
+        off = Gtk.Label(label=tr('When turned off on this machine'), xalign=0)
+        off.add_css_class("feature-section")
         content.append(off)
         current = self.staged.get(feature.id, {}).get("mode", off_mode(feature, snapshot.machine))
         group = None
@@ -436,13 +470,17 @@ class FeaturesPage(Gtk.Box):
             self.controls.append(option)
             option.connect("toggled", lambda widget, m=mode: widget.get_active() and self.mode_changed(feature, m))
             content.append(option)
-        # Stacked: long labels in the narrow panel must not widen it.
-        actions = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, halign=Gtk.Align.START)
-        talk = Gtk.Button(label=tr('Talk about this customization'))
+        actions = Gtk.Box(spacing=4)
+        actions.add_css_class("feature-actions")
+        talk = Gtk.Button(label=tr('Ask the agent'))
+        talk.add_css_class("flat")
+        talk.add_css_class("link-action")
+        talk.set_tooltip_text(tr('Talk about this customization'))
         talk.connect("clicked", lambda *_: self.window.discuss_feature(feature))
         actions.append(talk)
         if self.removing != feature.id:
             remove = Gtk.Button(label=tr('Remove from repository'))
+            remove.add_css_class("flat")
             remove.add_css_class("destructive")
             remove.set_sensitive(not self.window.busy)
             self.controls.append(remove)
@@ -466,6 +504,7 @@ class FeaturesPage(Gtk.Box):
             yes.connect("clicked", lambda *_: self.remove(feature))
             confirm.append(yes)
             cancel = Gtk.Button(label=tr('Cancel'))
+            cancel.add_css_class("flat")
             cancel.connect("clicked", lambda *_: self.ask_removal(None))
             confirm.append(cancel)
             content.append(confirm)
@@ -630,11 +669,12 @@ class FeaturesPage(Gtk.Box):
         bound = "machine" in self.window.settings and not snapshot.binding_needed
         intro = Gtk.Label(label=tr('Each installation uses the choices of one machine. After reinstalling, use the same machine to get its choices back, or start it fresh.'),
                           xalign=0, wrap=True)
-        intro.add_css_class("muted")
+        intro.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        intro.add_css_class("feature-subtitle")
         content.append(intro)
         if message:
             note = Gtk.Label(label=message, xalign=0, wrap=True)
-            note.add_css_class("status-modified")
+            note.add_css_class("features-notice")
             content.append(note)
         names = [info["name"] for info in snapshot.machines]
         machines = list(snapshot.machines)
@@ -648,14 +688,29 @@ class FeaturesPage(Gtk.Box):
             row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             row.add_css_class("feature-row")
             head = Gtk.Box(spacing=8)
-            title = Gtk.Label(label=name, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
+            head.append(Gtk.Image.new_from_icon_name("computer-symbolic"))
+            title = Gtk.Label(label=name, xalign=0, ellipsize=Pango.EllipsizeMode.END)
             title.add_css_class("feature-title")
             head.append(title)
             if mine:
-                badge = Gtk.Label(label=tr('this installation'))
-                badge.add_css_class("feature-status")
-                badge.add_css_class("status-applied")
-                head.append(badge)
+                pill = Gtk.Label(label=tr('this installation'), valign=Gtk.Align.CENTER)
+                pill.add_css_class("feature-pill")
+                head.append(pill)
+            spacer = Gtk.Box(hexpand=True)
+            head.append(spacer)
+            if not info.get("unsaved") and editing != name and not confirming:
+                rename = Gtk.Button(icon_name="document-edit-symbolic", tooltip_text=tr('Rename'))
+                rename.add_css_class("flat")
+                rename.update_property([Gtk.AccessibleProperty.LABEL], [tr('Rename')])
+                rename.connect("clicked", lambda *_, n=name: self.render_machines(content, editing=n))
+                head.append(rename)
+                if not mine:
+                    remove = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text=tr('Remove'))
+                    remove.add_css_class("flat")
+                    remove.add_css_class("destructive")
+                    remove.update_property([Gtk.AccessibleProperty.LABEL], [tr('Remove')])
+                    remove.connect("clicked", lambda *_, n=name: self.render_machines(content, confirming=("remove", n)))
+                    head.append(remove)
             row.append(head)
             details = []
             if info.get("unsaved"):
@@ -671,7 +726,8 @@ class FeaturesPage(Gtk.Box):
             if info["install"] and info["install"] == install_id() and not mine:
                 details.append(tr('same installation as this one'))
             line = Gtk.Label(label=" · ".join(details), xalign=0, wrap=True)
-            line.add_css_class("muted")
+            line.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            line.add_css_class("feature-subtitle")
             row.append(line)
             actions = Gtk.Box(spacing=6)
             if editing == name:
@@ -684,6 +740,7 @@ class FeaturesPage(Gtk.Box):
                 entry.connect("activate", lambda field, old=name: self.machine_action(content, "rename", old, field.get_text().strip()))
                 actions.append(save)
                 cancel = Gtk.Button(label=tr('Cancel'))
+                cancel.add_css_class("flat")
                 cancel.connect("clicked", lambda *_: self.render_machines(content))
                 actions.append(cancel)
             elif confirming and confirming[1] == name:
@@ -691,11 +748,14 @@ class FeaturesPage(Gtk.Box):
                 text = (tr('Remove {name} from the repository?', name=name) if kind == "remove" else
                         tr('Start {name} over as a new machine? Its saved choices are cleared and nothing is applied until you choose.', name=name))
                 question = Gtk.Label(label=text, xalign=0, wrap=True)
+                question.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
                 row.append(question)
                 confirm = Gtk.Button(label=tr('Remove') if kind == "remove" else tr('Start fresh'))
+                confirm.add_css_class("destructive" if kind == "remove" else "suggested-action")
                 confirm.connect("clicked", lambda *_, n=name, k=kind: self.machine_action(content, k, n))
                 actions.append(confirm)
                 cancel = Gtk.Button(label=tr('Cancel'))
+                cancel.add_css_class("flat")
                 cancel.connect("clicked", lambda *_: self.render_machines(content))
                 actions.append(cancel)
             else:
@@ -706,26 +766,20 @@ class FeaturesPage(Gtk.Box):
                     actions.append(use)
                 if not info.get("unsaved"):
                     fresh = Gtk.Button(label=tr('Start fresh'))
+                    fresh.add_css_class("flat")
+                    fresh.add_css_class("link-action")
                     fresh.set_tooltip_text(tr('Use this name on this installation, without its earlier choices.'))
                     fresh.connect("clicked", lambda *_, n=name: self.render_machines(content, confirming=("fresh", n)))
                     actions.append(fresh)
-                    manage = Gtk.Box(spacing=6)
-                    rename = Gtk.Button(label=tr('Rename'))
-                    rename.add_css_class("flat")
-                    rename.connect("clicked", lambda *_, n=name: self.render_machines(content, editing=n))
-                    manage.append(rename)
-                    if not mine:
-                        remove = Gtk.Button(label=tr('Remove'))
-                        remove.add_css_class("flat")
-                        remove.connect("clicked", lambda *_, n=name: self.render_machines(content, confirming=("remove", n)))
-                        manage.append(remove)
-                    row.append(actions)
-                    actions = manage
-            row.append(actions)
+            if actions.get_first_child():
+                row.append(actions)
             for child in _walk(row):
                 if isinstance(child, (Gtk.Button, Gtk.Entry)):
                     child.set_sensitive(not busy)
             content.append(row)
+        section = Gtk.Label(label=tr('New machine').upper(), xalign=0, margin_top=14)
+        section.add_css_class("feature-group")
+        content.append(section)
         create = Gtk.Box(spacing=6)
         entry = Gtk.Entry(placeholder_text=tr('New machine name'), hexpand=True)
         create.append(entry)

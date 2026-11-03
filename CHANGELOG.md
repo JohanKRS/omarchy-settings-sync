@@ -4,6 +4,8 @@
 
 - Add a **Customizations** tab with a switch per customization saved in the
   configuration repository, grouped by area, searchable and filterable by state.
+  Flat rows with expandable details, colored state dots and quiet actions follow
+  the active Omarchy theme, light or dark.
   Choices are staged until **Apply** and saved per machine under `machines/`.
 - Read customizations from a `features.toml` catalog. The panel applies and
   reverts files, lines, marked blocks, JSON/INI/TOML keys, MIME defaults, user

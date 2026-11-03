@@ -148,17 +148,31 @@ class Theme:
                                  color: alpha({fg}, .65); min-height: 24px; }}
             .view-tabs button:hover {{ color: {fg}; background: transparent; }}
             .view-tabs button:checked {{ color: {fg}; border-bottom-color: {accent}; background: transparent; }}
-            .feature-row {{ border-bottom: 1px solid alpha({fg}, .1); padding: 10px 2px; }}
-            .feature-row.unavailable {{ opacity: .6; }}
+            .feature-row {{ border-bottom: 1px solid alpha({fg}, .08); padding: 12px 6px; }}
+            .feature-row:hover, .feature-row.expanded {{ background: alpha({fg}, .03); }}
+            .feature-row.unavailable {{ opacity: .55; }}
             .feature-title {{ font-weight: 600; }}
-            .feature-group {{ font-size: {max(1, size - 1)}px; font-weight: 600; color: alpha({fg}, .65); margin-top: 12px; }}
-            .feature-details {{ padding: 4px 0 2px 14px; border-left: 2px solid alpha({accent}, .35); }}
-            .feature-status {{ font-size: {max(1, size - 1)}px; padding: 1px 6px; border-radius: {radius}px; }}
-            .status-applied {{ color: {good}; }}
-            .status-pending, .status-staged {{ color: {warning}; }}
-            .status-modified {{ color: {urgent}; }}
-            .status-off, .status-unavailable {{ color: alpha({fg}, .55); }}
-            .status-new {{ color: {accent}; border: 1px solid alpha({accent}, .6); }}
+            .feature-subtitle {{ font-size: {max(1, size - 1)}px; color: alpha({fg}, .6); }}
+            .feature-chevron {{ color: alpha({fg}, .45); margin-top: 2px; }}
+            .feature-group-row {{ margin: 18px 6px 4px; }}
+            .feature-group {{ font-size: {max(1, size - 2)}px; font-weight: 600; letter-spacing: 1px;
+                              color: alpha({fg}, .55); }}
+            .feature-count {{ font-size: {max(1, size - 2)}px; color: alpha({fg}, .4); }}
+            .feature-section {{ font-size: {max(1, size - 2)}px; font-weight: 600; letter-spacing: 1px;
+                                color: alpha({fg}, .5); margin-top: 6px; }}
+            .feature-details {{ margin: 2px 0 2px 26px; padding-left: 12px; border-left: 2px solid alpha({accent}, .3); }}
+            .feature-status {{ font-size: {max(1, size - 1)}px; color: alpha({fg}, .7); }}
+            .status-dot {{ font-size: {max(1, size - 4)}px; }}
+            .status-dot.status-applied {{ color: {good}; }}
+            .status-dot.status-pending, .status-dot.status-staged {{ color: {warning}; }}
+            .status-dot.status-modified {{ color: {urgent}; }}
+            .status-dot.status-off, .status-dot.status-unavailable {{ color: alpha({fg}, .35); }}
+            .feature-pill {{ font-size: {max(1, size - 2)}px; color: {accent}; background: alpha({accent}, .14);
+                             padding: 1px 8px; border-radius: {max(radius, 4)}px; }}
+            .features-notice {{ background: alpha({accent}, .07); border-left: 2px solid {accent}; padding: 4px 4px 4px 12px; }}
+            button.link-action {{ color: {accent}; padding: 2px 8px; min-height: 22px; }}
+            button.machine-button {{ padding: 4px 10px; }}
+            .feature-actions {{ margin-top: 4px; }}
             switch {{ background: alpha({fg}, .12); border: 1px solid alpha({fg}, .4);
                       border-radius: {radius}px; min-height: 20px; }}
             switch:checked {{ background: alpha({accent}, .35); border-color: {accent}; }}
@@ -169,9 +183,10 @@ class Theme:
             radio {{ background: {bg}; border: 1px solid alpha({fg}, .4); }}
             radio:checked {{ background: {accent}; color: {bg}; border-color: {accent}; }}
             .features-banner {{ border-left: 2px solid {warning}; background: alpha({warning}, .06);
-                                padding: 8px 10px; }}
+                                padding: 6px 6px 6px 12px; }}
             .pending-bar {{ border-top: 1px solid alpha({fg}, .16); padding-top: 8px; }}
             button.destructive {{ color: {urgent}; border-color: alpha({urgent}, .6); }}
+            button.flat.destructive {{ border-color: transparent; }}
             button.destructive:hover:not(:disabled) {{ background: alpha({urgent}, .12); }}
         """.encode())
         if self.window.vte:
