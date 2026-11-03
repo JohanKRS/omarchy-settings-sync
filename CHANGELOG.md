@@ -15,8 +15,9 @@
   starting the agent unless needed. Repositories without a catalog keep the
   agent-led Sync; **Create catalog** asks the agent to convert them.
 - Manage machines from the Customizations tab: list, rename, remove or create
-  one, and link a reinstalled installation to its earlier machine. Sync waits
-  until a new installation is linked.
+  one, and link a reinstalled installation to its earlier machine or start it
+  fresh with the catalog defaults. Sync waits until a new installation is
+  linked.
 
 ## 0.1.13 — 2026-10-27
 

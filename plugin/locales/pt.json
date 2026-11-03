@@ -218,7 +218,6 @@
   "Machines": "Máquinas",
   "This installation is not linked to a machine yet. Choose one to reuse its choices, or create a new one.": "Esta instalação ainda não está ligada a uma máquina. Escolha uma para reaproveitar as escolhas dela, ou crie uma nova.",
   "Choose machine": "Escolher máquina",
-  "Each installation uses the choices of one machine. After reinstalling, choose the same machine to get its choices back.": "Cada instalação usa as escolhas de uma máquina. Depois de formatar, escolha a mesma máquina para recuperar as escolhas dela.",
   "this installation": "esta instalação",
   "not saved yet": "ainda não salva",
   "updated {date}": "atualizada em {date}",
@@ -226,12 +225,18 @@
   "same installation as this one": "mesma instalação que esta",
   "Save": "Salvar",
   "Remove {name} from the repository?": "Remover {name} do repositório?",
-  "Use on this installation": "Usar nesta instalação",
   "Rename": "Renomear",
   "New machine name": "Nome da nova máquina",
   "Create and use": "Criar e usar",
   "Use lowercase letters, digits and hyphens.": "Use letras minúsculas, números e hífens.",
   "A machine with this name already exists.": "Já existe uma máquina com esse nome.",
   "Choose which machine this installation is, then sync again.": "Escolha qual máquina é esta instalação e sincronize de novo.",
-  "Machine not chosen yet": "Máquina ainda não escolhida"
+  "Machine not chosen yet": "Máquina ainda não escolhida",
+  "Start {name} over as a new machine? Its saved choices return to the catalog defaults.": "Começar {name} do zero, como uma máquina nova? As escolhas salvas dela voltam aos padrões do catálogo.",
+  "Start fresh": "Começar do zero",
+  "Use its choices here": "Usar as escolhas dela aqui",
+  "Use this name on this installation, without its earlier choices.": "Usar este nome nesta instalação, sem as escolhas anteriores.",
+  "This installation starts as a new machine. Review the customizations, then sync.": "Esta instalação começa como uma máquina nova. Revise as personalizações e depois sincronize.",
+  "Each installation uses the choices of one machine. After reinstalling, use the same machine to get its choices back, or start it fresh.": "Cada instalação usa as escolhas de uma máquina. Depois de formatar, use a mesma máquina para recuperar as escolhas dela, ou comece do zero.",
+  "Use this name": "Usar este nome"
 }

@@ -95,8 +95,9 @@ Choices are stored in `machines/<name>.toml`. The name starts as the hostname.
 repository with its hostname, Omarchy version and last update, and lets you
 rename or remove one, create a new one, or link this installation to an
 existing machine. After a reinstall the tab asks which machine the new
-installation is, so you get its previous choices back; Sync waits for that
-answer. A short, non-reversible id derived from `/etc/machine-id` tells a new
+installation is: use its previous choices, or **Start fresh** to keep the name
+but begin with the catalog defaults, as a new machine would. Sync waits for
+that answer. A short, non-reversible id derived from `/etc/machine-id` tells a new
 installation apart from the old one without publishing the machine id:
 
 ```toml

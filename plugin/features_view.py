@@ -539,7 +539,7 @@ class FeaturesPage(Gtk.Box):
         snapshot = self.snapshot
         current = snapshot.machine_name
         bound = "machine" in self.window.settings and not snapshot.binding_needed
-        intro = Gtk.Label(label=tr('Each installation uses the choices of one machine. After reinstalling, choose the same machine to get its choices back.'),
+        intro = Gtk.Label(label=tr('Each installation uses the choices of one machine. After reinstalling, use the same machine to get its choices back, or start it fresh.'),
                           xalign=0, wrap=True)
         intro.add_css_class("muted")
         content.append(intro)
@@ -597,33 +597,45 @@ class FeaturesPage(Gtk.Box):
                 cancel = Gtk.Button(label=tr('Cancel'))
                 cancel.connect("clicked", lambda *_: self.render_machines(content))
                 actions.append(cancel)
-            elif confirming == name:
-                question = Gtk.Label(label=tr('Remove {name} from the repository?', name=name), xalign=0, hexpand=True, wrap=True)
-                actions.append(question)
-                remove = Gtk.Button(label=tr('Remove'))
-                remove.connect("clicked", lambda *_, n=name: self.machine_action(content, "remove", n))
-                actions.append(remove)
+            elif confirming and confirming[1] == name:
+                kind = confirming[0]
+                text = (tr('Remove {name} from the repository?', name=name) if kind == "remove" else
+                        tr('Start {name} over as a new machine? Its saved choices return to the catalog defaults.', name=name))
+                question = Gtk.Label(label=text, xalign=0, wrap=True)
+                row.append(question)
+                confirm = Gtk.Button(label=tr('Remove') if kind == "remove" else tr('Start fresh'))
+                confirm.connect("clicked", lambda *_, n=name, k=kind: self.machine_action(content, k, n))
+                actions.append(confirm)
                 cancel = Gtk.Button(label=tr('Cancel'))
                 cancel.connect("clicked", lambda *_: self.render_machines(content))
                 actions.append(cancel)
             else:
                 if not mine:
-                    use = Gtk.Button(label=tr('Use on this installation'))
+                    use = Gtk.Button(label=tr('Use this name') if info.get("unsaved") else tr('Use its choices here'))
                     use.add_css_class("suggested-action")
                     use.connect("clicked", lambda *_, n=name: self.machine_action(content, "use", n))
                     actions.append(use)
                 if not info.get("unsaved"):
+                    fresh = Gtk.Button(label=tr('Start fresh'))
+                    fresh.set_tooltip_text(tr('Use this name on this installation, without its earlier choices.'))
+                    fresh.connect("clicked", lambda *_, n=name: self.render_machines(content, confirming=("fresh", n)))
+                    actions.append(fresh)
+                    manage = Gtk.Box(spacing=6)
                     rename = Gtk.Button(label=tr('Rename'))
+                    rename.add_css_class("flat")
                     rename.connect("clicked", lambda *_, n=name: self.render_machines(content, editing=n))
-                    actions.append(rename)
+                    manage.append(rename)
                     if not mine:
                         remove = Gtk.Button(label=tr('Remove'))
-                        remove.connect("clicked", lambda *_, n=name: self.render_machines(content, confirming=n))
-                        actions.append(remove)
-            for child in list(_children(actions)):
+                        remove.add_css_class("flat")
+                        remove.connect("clicked", lambda *_, n=name: self.render_machines(content, confirming=("remove", n)))
+                        manage.append(remove)
+                    row.append(actions)
+                    actions = manage
+            row.append(actions)
+            for child in _walk(row):
                 if isinstance(child, (Gtk.Button, Gtk.Entry)):
                     child.set_sensitive(not busy)
-            row.append(actions)
             content.append(row)
         create = Gtk.Box(spacing=6)
         entry = Gtk.Entry(placeholder_text=tr('New machine name'), hexpand=True)
@@ -655,7 +667,7 @@ class FeaturesPage(Gtk.Box):
                 paths = rename_machine(snapshot.checkout, name, target)
             elif action == "remove":
                 paths = remove_machine(snapshot.checkout, name)
-            elif action == "create":
+            elif action in ("create", "fresh"):
                 path = machine_path(snapshot.checkout, target)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(machine_text(target, {}, hostname=platform.node(), omarchy=Probe().omarchy(),
@@ -664,13 +676,15 @@ class FeaturesPage(Gtk.Box):
             if not paths or not publish:
                 return None
             verb = {"rename": f"Rename machine {name} to {target}", "remove": f"Remove machine {name}",
-                    "create": f"Add machine {target}"}[action]
+                    "create": f"Add machine {target}", "fresh": f"Start machine {name} fresh"}[action]
             return checkout.publish(snapshot.checkout, branch, paths, verb)
         def done(problem):
             self.loading = False
             settings = self.window.settings
-            if action in ("use", "create") or (action == "rename" and name == snapshot.machine_name):
+            if action in ("use", "create", "fresh") or (action == "rename" and name == snapshot.machine_name):
                 settings["machine"] = target
+            if action in ("create", "fresh"):
+                self.window.status.set_text(tr('This installation starts as a new machine. Review the customizations, then sync.'))
             self.window.save_settings()
             if problem:
                 self.window.status.set_text(tr('Not published: {problem}', problem=problem.splitlines()[0][:160]))
@@ -684,8 +698,9 @@ class FeaturesPage(Gtk.Box):
         self.window.worker(work, done, failed)
 
 
-def _children(widget):
+def _walk(widget):
     child = widget.get_first_child()
     while child:
         yield child
+        yield from _walk(child)
         child = child.get_next_sibling()

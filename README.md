@@ -58,8 +58,8 @@ judgment or for conflicts with local edits. See the
 [customizations catalog](docs/CONFIGURATION.md#customizations-catalog).
 
 **Manage machines** renames or removes machines in the repository. After a
-reinstall, the tab asks which machine this installation is, so its earlier
-choices come back.
+reinstall, the tab asks which machine this installation is: bring back its
+earlier choices, or start it fresh as a new machine.
 
 Repositories created before the catalog keep the agent-led Sync. Use
 **Customizations → Create catalog** to convert one.

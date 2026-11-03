@@ -849,6 +849,16 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         wait(lambda: window.settings.get("machine") == "work-laptop" and not page.loading)
         assert not (checkout_dir / "machines/laptop.toml").exists()
         other = next(info["name"] for info in page.snapshot.machines if info["name"] != "work-laptop")
+        (checkout_dir / f"machines/{other}.toml").write_text(
+            f'name = "{other}"\ninstall = "old-install"\n\n[features]\nidle = "on"\n')
+        page.show_machines()
+        page.machine_action(content, "fresh", other)
+        wait(lambda: window.settings.get("machine") == other and not page.loading)
+        fresh = (checkout_dir / f"machines/{other}.toml").read_text()
+        assert "idle" not in fresh and "old-install" not in fresh, fresh
+        page.show_machines()
+        page.machine_action(content, "use", "work-laptop")
+        wait(lambda: window.settings.get("machine") == "work-laptop" and not page.loading)
         page.show_machines()
         page.machine_action(content, "remove", other)
         wait(lambda: not page.loading and not (checkout_dir / f"machines/{other}.toml").exists())
