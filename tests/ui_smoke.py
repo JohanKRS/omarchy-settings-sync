@@ -792,6 +792,16 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
         window.setup()
         assert window.pages.get_visible_child_name() == "settings" and window.settings_tab.get_active()
+        # Updates: the switch is saved, and a check with automatic updates off only reports.
+        auto = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Switch))
+        auto.set_active(False)
+        assert window.settings["auto_update"] is False
+        window.updater.fetch = lambda: {"tag": "v9.9.9", "version": "9.9.9", "url": "", "notes": ""}
+        window.updater.path = Path(env["XDG_STATE_HOME"]) / "update.json"
+        window.check_updates(force=True)
+        wait(lambda: not window.update_checking)
+        assert "9.9.9" in window.update_label.get_text() and window.update_now.get_visible()
+        assert "installed" not in window.updater.state
         assert window.setup_panel.get_parent() is not None and not window.overlays(), "Settings is a tab, not an overlay"
         project_link = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.LinkButton))
         assert project_link.get_uri() == 'https://github.com/JohanKRS/omarchy-settings-sync'

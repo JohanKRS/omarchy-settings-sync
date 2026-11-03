@@ -277,5 +277,17 @@
   "Adjust with the agent": "Ajustar con el agente",
   "Adjust “{title}” after the Omarchy update": "Ajustar “{title}” tras la actualización de Omarchy",
   "Existing customizations": "Personalizaciones existentes",
-  "About": "Acerca de"
+  "About": "Acerca de",
+  "Checking for updates…": "Buscando actualizaciones…",
+  "Version {version} is installed. Close and reopen the panel to use it.": "La versión {version} está instalada. Cierra y vuelve a abrir el panel para usarla.",
+  "This copy is on a test branch; switch it to main to update.": "Esta copia está en una rama de pruebas; vuelve a main para actualizar.",
+  "The installed copy has local edits.": "La copia instalada tiene cambios locales.",
+  "Update it with omarchy plugin update.": "Actualízala con omarchy plugin update.",
+  "Version {version} is available.": "La versión {version} está disponible.",
+  "Could not check for updates: {problem}": "No se pudieron buscar actualizaciones: {problem}",
+  "Up to date · checked {time}": "Al día · comprobado el {time}",
+  "Update automatically": "Actualizar automáticamente",
+  "Install new GitHub releases of this plugin when the panel is idle.": "Instala las nuevas versiones de este plugin en GitHub cuando el panel está inactivo.",
+  "Check now": "Comprobar ahora",
+  "Update now": "Actualizar ahora"
 }

@@ -21,6 +21,10 @@
 - **Remove from repository** undoes a customization here and asks the agent to
   delete it from the repository; other machines undo it on their next Sync from
   their own record, even after its files are gone.
+- Update the plugin automatically from GitHub releases: check once a day, and
+  while idle fast-forward a clean default-branch install to the latest release
+  tag, never to unreleased commits. Settings shows the state, with Check now,
+  Update now and an Update automatically switch.
 - Turn Settings into a tab on the right, after Conversation and Customizations,
   with flat sections for the repository, agent, existing customizations and
   version; Escape returns to the previous tab.

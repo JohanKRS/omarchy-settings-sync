@@ -243,9 +243,16 @@ omarchy plugin enable community.agent-settings
 omarchy plugin remove community.agent-settings
 ```
 
-Finish or stop active work before updating or removing the plugin. Updates use
-the repository's default branch through Omarchy's normal updater; no agent is
-needed. Local edits in the installed checkout can prevent a fast-forward update.
+The plugin also updates itself. Once a day it checks this project's latest
+GitHub release and, when the panel is idle, fast-forwards the installed copy
+to that release's tag, never to unreleased commits. The new version loads the
+next time the panel starts. **Settings → About** shows the state, has
+**Check now**, and an **Update automatically** switch. A copy on another branch
+or with local edits is left alone.
+
+Finish or stop active work before updating or removing the plugin. Manual
+updates use the repository's default branch through Omarchy's normal updater;
+no agent is needed. Local edits in the installed checkout can prevent a fast-forward update.
 Disabling the bar widget hides its panel; active tasks are preserved.
 For predictable shutdown, finish them first. Removal preserves your configuration
 repository and local plugin data.

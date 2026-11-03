@@ -106,6 +106,15 @@ clones, fast-forwards and, with **Push changes** enabled, commits and pushes
 only this machine's `machines/<name>.toml`. It refuses to push when the working
 copy has other unpublished commits.
 
+## Plugin updates
+
+Once a day, the panel asks the GitHub API for this project's latest release,
+without credentials. With **Update automatically** on, and only while no task
+is running, it fetches that release's tag into the installed checkout and
+fast-forwards to it. It never moves a checkout that is on another branch or has
+local edits, and it does not run code from the release until the panel
+restarts. Turn the switch off to only be notified.
+
 ## Distribution
 
 Omarchy's updater follows the upstream Git branch. A marketplace review applies

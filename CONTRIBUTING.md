@@ -44,7 +44,8 @@ and 3.14; graphical and shell integration checks require an Omarchy session.
   machine choices; `plugin/applier.py` applies and reverts catalog parts with a
   per-machine ledger; `plugin/checkout.py` manages the plugin's working copy;
   `plugin/features_view.py` builds the Customizations tab; `plugin/release.py`
-  compares Omarchy defaults between versions for the post-update review.
+  compares Omarchy defaults between versions for the post-update review;
+  `plugin/updater.py` installs new GitHub releases of the plugin.
 - `plugin/message_markup.py` parses Markdown and restricts inline markup/links;
   `plugin/message_view.py` builds the native message widgets. The pinned parser
   and its update instructions are in `plugin/_vendor/`.

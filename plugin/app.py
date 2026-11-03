@@ -37,6 +37,9 @@ from message_view import MessageBody
 from activity_indicator import ActivityIndicator
 from applier import delegation, removal
 from release import agent_request as release_request
+from updater import Updater, installed_version
+
+RUNNING_VERSION = installed_version()  # The code in memory; the copy on disk may be newer after an update.
 import checkout
 from features import machine_name
 from features_view import (FeaturesPage, changes_for_sync, collect, local_catalog, make_applier, results_path,
@@ -256,6 +259,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.theme = Theme(self)
         self.theme_timer = GLib.timeout_add_seconds(2, self.refresh_theme)
         self.attention_timer = GLib.timeout_add_seconds(10, self.update_attention)
+        self.updater = Updater(self.locations["state"] / "update.json")
+        self.update_checking = False
+        if application.get_application_id() == "org.omarchy.AgentSettings":
+            # Only the real panel talks to GitHub; tests and screenshots use other IDs.
+            GLib.timeout_add_seconds(5, self.check_updates)
         self.update_attention(force=True)
         self.connect("notify::visible", lambda *_: self.update_attention(force=True))
         self.connect("close-request", self.close_window)
@@ -579,6 +587,52 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.save_settings()
         self.set_visible(False)
         self.quit_if_idle()
+
+    def check_updates(self, force=False, install=None):
+        """Daily release check; installs only while idle, and the new code loads on the next start."""
+        if self.update_checking or not (force or self.updater.due()):
+            return False
+        idle = not (self.busy or self.terminal_pid or self.delivery_pending)
+        install = idle and (self.settings.get("auto_update", True) if install is None else install)
+        self.update_checking = True
+        def done(_state):
+            self.update_checking = False
+            if self.setup_panel in self.panels:
+                self.refresh_update_status()
+        def failed(message):
+            self.update_checking = False
+            self.status.set_text(message)
+        self.worker(lambda: self.updater.check(install=install), done, failed)
+        if self.setup_panel in self.panels:
+            self.refresh_update_status()
+        return False
+
+    def update_status(self):
+        state = self.updater.state
+        on_disk = installed_version()
+        release = self.updater.available()
+        if self.update_checking:
+            return tr('Checking for updates…')
+        if on_disk and on_disk != RUNNING_VERSION:
+            return tr('Version {version} is installed. Close and reopen the panel to use it.', version=on_disk)
+        if release:
+            reason = {"branch": tr('This copy is on a test branch; switch it to main to update.'),
+                      "modified": tr('The installed copy has local edits.'),
+                      "not-git": tr('Update it with omarchy plugin update.')}.get(state.get("blocked"), "")
+            return " ".join(filter(None, [tr('Version {version} is available.', version=release["version"]), reason]))
+        if state.get("error"):
+            return tr('Could not check for updates: {problem}', problem=state["error"])
+        if state.get("checked"):
+            return tr('Up to date · checked {time}', time=time.strftime('%d/%m %H:%M', time.localtime(state["checked"])))
+        return ""
+
+    def refresh_update_status(self):
+        if getattr(self, "update_label", None):
+            self.update_label.set_text(self.update_status())
+            self.update_label.set_visible(bool(self.update_label.get_text()))
+        if getattr(self, "update_now", None):
+            release = self.updater.available()
+            self.update_now.set_visible(bool(release) and not self.updater.state.get("blocked") and not self.update_checking)
 
     def quit_if_idle(self):
         if self.get_visible() or self.busy or self.terminal_pid or self.question_windows or self.delivery_pending:
@@ -2140,7 +2194,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         review.set_sensitive(not locked and bool(self.executables[self.agent()]))
         review.connect('clicked', lambda *_: save(review_existing=True))
         content.append(review)
-        version = read_json(ROOT / 'manifest.json', {}).get('version')
+        version = RUNNING_VERSION
         if version:
             section(tr('About'))
             footer = label('v' + version, 'muted', selectable=True)
@@ -2154,6 +2208,35 @@ class SettingsWindow(Gtk.ApplicationWindow):
             repository_link.get_child().add_css_class('settings-version')
             version_row.append(repository_link)
             content.append(version_row)
+            automatic = box(False, 8)
+            automatic_label = label(tr('Update automatically'))
+            automatic_label.set_hexpand(True)
+            automatic.append(automatic_label)
+            automatic_switch = Gtk.Switch(active=self.settings.get("auto_update", True), valign=Gtk.Align.CENTER)
+            automatic_switch.set_tooltip_text(tr('Install new GitHub releases of this plugin when the panel is idle.'))
+            automatic_switch.update_property([Gtk.AccessibleProperty.LABEL], [tr('Update automatically')])
+            def automatic_changed(widget, _):
+                self.settings["auto_update"] = widget.get_active()
+                self.save_settings()
+            automatic_switch.connect("notify::active", automatic_changed)
+            automatic.append(automatic_switch)
+            content.append(automatic)
+            self.update_label = label("", "feature-subtitle")
+            content.append(self.update_label)
+            update_actions = box(False, 4)
+            check = Gtk.Button(label=tr('Check now'))
+            check.add_css_class("flat")
+            check.add_css_class("link-action")
+            check.add_css_class("inline-link")
+            check.connect("clicked", lambda *_: self.check_updates(force=True))
+            update_actions.append(check)
+            self.update_now = Gtk.Button(label=tr('Update now'))
+            self.update_now.add_css_class("flat")
+            self.update_now.add_css_class("link-action")
+            self.update_now.connect("clicked", lambda *_: self.check_updates(force=True, install=True))
+            update_actions.append(self.update_now)
+            content.append(update_actions)
+            self.refresh_update_status()
             self.settings_about = content
         if locked:
             for widget in (repository, branch, mode, existing, create):
