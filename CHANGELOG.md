@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- New plugin icon in the bar, panel header and window: a toggle inside a sync
+  loop that follows the bar colors, with a small dot while a reply is waiting.
 - Add a **Customizations** tab with a switch per customization saved in the
   configuration repository, grouped by area, searchable and filterable by state.
   Flat rows with expandable details, colored state dots and quiet actions follow

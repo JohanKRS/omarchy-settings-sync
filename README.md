@@ -98,7 +98,7 @@ For a private GitHub configuration repository, set up authentication using
 omarchy plugin add https://github.com/JohanKRS/omarchy-settings-sync.git --enable
 ```
 
-Open the settings icon in the bar. On first launch, missing GTK dependencies
+Open the Omarchy Settings Sync icon in the bar. On first launch, missing GTK dependencies
 are installed through `omarchy pkg add` in a visible terminal; the package
 manager may request your administrator password. Agent CLIs are installed
 separately through Omarchy's agent menu.
@@ -111,8 +111,8 @@ URL. An empty branch uses the repository's default branch. See the
 
 | Control | Behavior |
 | --- | --- |
-| Settings icon, left click | Open or hide the panel; reveal a pending question |
-| Settings icon, right click | No action |
+| Bar icon, left click | Open or hide the panel; reveal a pending question |
+| Bar icon, right click | No action |
 | **Conversation / Customizations** tabs | Talk to the agent, or switch individual customizations on and off for this machine |
 | **Sync**, at the bottom of Customizations | Apply repository updates to what is on for this machine; without a catalog, ask the agent to sync |
 | Message field | Request a specific change; optionally publish its reusable configuration |

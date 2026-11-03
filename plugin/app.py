@@ -48,6 +48,9 @@ from features_view import (FeaturesPage, changes_for_sync, collect, local_catalo
 NATIVE_AGENTS = {"codex", "claude"}
 DIRECTION_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
     str(Path(__file__).with_name('icons') / 'direction-upload-symbolic.svg')))
+APP_ICON_NAME = 'omarchy-settings-sync-symbolic'
+APP_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
+    str(Path(__file__).with_name('icons') / f'{APP_ICON_NAME}.svg')))
 
 from core import (
     AGENTS, ROOT, CodexClient, RpcError, cached_models, codex_defaults, default_agent, external_command,
@@ -198,7 +201,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         for edge in (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM, LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT):
             LayerShell.set_anchor(self, edge, True)
         self.popup_bounds = (0, 0, 560, 640)
-        self.set_icon_name("preferences-system-symbolic")
+        Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(
+            str(Path(__file__).with_name('icons')))
+        self.set_icon_name(APP_ICON_NAME)
         self.locations = paths()
         self.settings_file = self.locations["config"] / "settings.json"
         self.settings = read_json(self.settings_file, {})
@@ -302,7 +307,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.popup_card.add_css_class("popup-card")
         header = box(False, 10)
         header.add_css_class("popup-header")
-        icon = Gtk.Image.new_from_icon_name("preferences-system-symbolic")
+        icon = Gtk.Image.new_from_gicon(APP_ICON)
         icon.set_pixel_size(26)
         header.append(icon)
         title = label("Omarchy Settings Sync", "title")
