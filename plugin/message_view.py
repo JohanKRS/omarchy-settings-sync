@@ -41,8 +41,12 @@ class TableView(Gtk.Box):
         self.scroll.allocate(width, height, baseline, None)
 
 
+LINK_OPENER = None  # Set by the panel: opens a link after hiding the full-screen overlay.
+
+
 def markup_label(markup, *, xalign=0):
     label = Gtk.Label(xalign=xalign, yalign=0, wrap=True, selectable=True, hexpand=True)
+    label.connect("activate-link", lambda _label, uri: LINK_OPENER(uri) if LINK_OPENER else False)
     label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
     label.set_max_width_chars(1)
     label.set_markup(markup)
