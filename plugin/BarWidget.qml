@@ -88,12 +88,11 @@ Ui.BarWidget {
   // vector so it follows the bar colour. BarIconButton loads it into its
   // 16 px optical canvas in place of a font glyph.
   //
-  // The bar draws its other icons from a hinted font, so their edges sit on
-  // whole screen pixels. This version of plugin/icons/omarchy-settings-sync-symbolic.svg
-  // is drawn on a coarse grid whose unit is a whole number of physical
-  // pixels, and its origin is snapped to the pixel grid, so its strokes are
-  // as crisp as the glyphs beside it. It is 9 x 8 units, about the size of
-  // those glyphs, and sits on their slightly raised centre line.
+  // The bar's other icons are hinted font glyphs: their 1 px strokes sit on
+  // whole pixels. This draws plugin/icons/omarchy-settings-sync-symbolic.svg
+  // at 12/16 of the canvas, where its 2-unit strokes are exactly one logical
+  // pixel like theirs, and snaps it to the device pixel grid so the edges
+  // stay as crisp. It is lifted to the glyphs' slightly raised centre line.
   Component {
     id: syncIcon
 
@@ -101,18 +100,12 @@ Ui.BarWidget {
       id: syncGlyph
       readonly property color tint: button.active && button.useActiveColor ? button.activeColor : button.foreground
       readonly property real dpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
-      // One grid unit in physical pixels; 10 units span about 12/16 of the canvas.
-      readonly property int unit: Math.max(1, Math.round(height * 12 / 16 * dpr / 10))
-      readonly property real step: unit / dpr
-      readonly property real lift: Math.round(height * 0.9 / 16 * dpr) / dpr
-
-      function px(x, y) { return (x * unit) + " " + (y * unit) }
+      readonly property real drawSize: height * 12 / 16
 
       function place() {
-        // Centre the 9 x 8 unit drawing (x 0.5-9.5, y 1-9), then snap to physical pixels.
         var origin = syncGlyph.mapToItem(null, 0, 0)
-        var left = width / 2 - 5 * step
-        var top = height / 2 - 5 * step - lift
+        var left = (width - drawSize) / 2
+        var top = (height - drawSize) / 2 - Math.round(height / 16)
         syncShape.x = Math.round((origin.x + left) * dpr) / dpr - origin.x
         syncShape.y = Math.round((origin.y + top) * dpr) / dpr - origin.y
       }
@@ -130,26 +123,17 @@ Ui.BarWidget {
 
       Shape {
         id: syncShape
-        width: 10 * syncGlyph.unit
-        height: 10 * syncGlyph.unit
-        scale: 1 / syncGlyph.dpr
+        width: 24
+        height: 24
+        scale: syncGlyph.drawSize / 24
         transformOrigin: Item.TopLeft
-        preferredRendererType: Shape.GeometryRenderer
-        antialiasing: true
+        preferredRendererType: Shape.CurveRenderer
 
         ShapePath {
           fillColor: syncGlyph.tint
           strokeColor: "transparent"
           strokeWidth: -1
-          PathSvg {
-            path: "M" + syncGlyph.px(0.5, 7) + "L" + syncGlyph.px(0.5, 2) + "L" + syncGlyph.px(8, 2) + "L" + syncGlyph.px(8, 3)
-                  + "L" + syncGlyph.px(1.5, 3) + "L" + syncGlyph.px(1.5, 7) + "Z"
-                  + "M" + syncGlyph.px(8, 1) + "L" + syncGlyph.px(9.5, 2.5) + "L" + syncGlyph.px(8, 4) + "Z"
-                  + "M" + syncGlyph.px(9.5, 3) + "L" + syncGlyph.px(9.5, 8) + "L" + syncGlyph.px(2, 8) + "L" + syncGlyph.px(2, 7)
-                  + "L" + syncGlyph.px(8.5, 7) + "L" + syncGlyph.px(8.5, 3) + "Z"
-                  + "M" + syncGlyph.px(2, 6) + "L" + syncGlyph.px(0.5, 7.5) + "L" + syncGlyph.px(2, 9) + "Z"
-                  + "M" + syncGlyph.px(5, 4) + "L" + syncGlyph.px(7, 4) + "L" + syncGlyph.px(7, 6) + "L" + syncGlyph.px(5, 6) + "Z"
-          }
+          PathSvg { path: "M2 15V5h16.59l-3-3L17 .59 23.41 7H4v8zM22 9v10H5.41l3 3L7 23.41.59 17H20V9zM12 9h6v6h-6z" }
         }
       }
 
@@ -157,8 +141,8 @@ Ui.BarWidget {
       // colour, plus a dot just outside its top-right corner.
       Rectangle {
         visible: root.waiting
-        x: syncShape.x + 9.5 * syncGlyph.step - 1
-        y: syncShape.y + syncGlyph.step - 3
+        x: syncShape.x + syncGlyph.drawSize - 1
+        y: syncShape.y - 2
         width: 4
         height: 4
         radius: 2
