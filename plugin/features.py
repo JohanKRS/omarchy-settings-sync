@@ -7,6 +7,7 @@ both. It never writes to a destination; see applier.py for that.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -327,6 +328,59 @@ def machine_path(repository, name):
     return Path(repository) / MACHINES / f"{name}.toml"
 
 
+def install_id(path="/etc/machine-id"):
+    """A stable, non-reversible id for this installation; it changes after a reinstall."""
+    try:
+        raw = Path(path).read_text().strip()
+    except OSError:
+        return ""
+    return hashlib.sha256(f"omarchy-settings-sync:{raw}".encode()).hexdigest()[:16] if raw else ""
+
+
+def machine_info(repository, name):
+    try:
+        data = tomllib.loads(machine_path(repository, name).read_text())
+    except (OSError, ValueError):
+        data = {}
+    features = data.get("features", {}) if isinstance(data.get("features"), dict) else {}
+    info = {key: str(data.get(key, "")) for key in ("hostname", "omarchy", "updated", "install")}
+    return dict(info, name=name, on=sum(v == "on" for v in features.values()),
+                off=sum(v == "off" for v in features.values()))
+
+
+def list_machines(repository):
+    folder = Path(repository) / MACHINES if repository else None
+    if not folder or not folder.is_dir():
+        return []
+    return [machine_info(repository, path.stem) for path in sorted(folder.glob("*.toml"))
+            if IDENTIFIER.fullmatch(path.stem)]
+
+
+def valid_machine(name):
+    return bool(IDENTIFIER.fullmatch(name or ""))
+
+
+def rename_machine(repository, old, new):
+    """Rename a machine file, keeping its choices. Returns the paths to publish."""
+    if not valid_machine(new):
+        raise ValueError("Use lowercase letters, digits and hyphens.")
+    source, target = machine_path(repository, old), machine_path(repository, new)
+    if target.exists():
+        raise ValueError(f"A machine named {new} already exists.")
+    info, record = machine_info(repository, old), load_machine(repository, old)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(machine_text(new, record, hostname=info["hostname"], omarchy=info["omarchy"],
+                                   updated=info["updated"], install=info["install"]))
+    source.unlink(missing_ok=True)
+    return [source, target]
+
+
+def remove_machine(repository, name):
+    path = machine_path(repository, name)
+    path.unlink(missing_ok=True)
+    return [path]
+
+
 def load_machine(repository, name):
     record = {"features": {}, "off": {}, "parts": {}}
     try:
@@ -344,10 +398,10 @@ def _toml_string(value):
     return json.dumps(str(value), ensure_ascii=False)
 
 
-def machine_text(name, record, *, hostname="", omarchy="", updated=""):
+def machine_text(name, record, *, hostname="", omarchy="", updated="", install=""):
     lines = ["# Choices for one machine. Edited by Omarchy Settings Sync.",
              f"name = {_toml_string(name)}"]
-    for key, value in (("hostname", hostname), ("omarchy", omarchy), ("updated", updated)):
+    for key, value in (("hostname", hostname), ("omarchy", omarchy), ("updated", updated), ("install", install)):
         if value:
             lines.append(f"{key} = {_toml_string(value)}")
     for table in ("features", "off", "parts"):

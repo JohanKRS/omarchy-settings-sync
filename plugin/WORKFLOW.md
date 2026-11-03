@@ -158,7 +158,8 @@ simple parts itself and sends you only what needs judgment or a conflict.
 - **Machine choices** live in `machines/<name>.toml`: `[features]` with
   `"on"`/`"off"`, `[off]` with `"keep"` or `"previous"`, and `[parts]` with
   `"<feature>.<part id>" = "off"`. Set a feature you create here to `"on"` for
-  this machine only. Do not edit other machines' files unless asked.
+  this machine only. Do not edit other machines' files unless asked. The panel
+  renames, removes and links machines; keep `name` equal to the file name.
 - **Local only.** With publishing disabled, add the feature to the local
   catalog named in the request (sources in a `local/` folder beside it), not
   to the repository.

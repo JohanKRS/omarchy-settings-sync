@@ -11,8 +11,9 @@ from applier import Applier, Ledger, delegation, status
 import checkout
 from context import repository_state
 from core import private_write
-from features import (GROUPS, Probe, dependents, desired, has_catalog, load_catalog, load_machine,
-                      machine_name, machine_path, machine_text, off_mode, ordered, part_enabled)
+from features import (GROUPS, Probe, dependents, desired, has_catalog, install_id, list_machines, load_catalog,
+                      load_machine, machine_name, machine_path, machine_text, off_mode, ordered, part_enabled,
+                      remove_machine, rename_machine, valid_machine)
 from i18n import tr
 
 FILTERS = ("all", "on", "off", "new", "pending", "modified", "unavailable")
@@ -37,6 +38,8 @@ class Snapshot:
     states: dict = field(default_factory=dict)
     labels: dict = field(default_factory=dict)
     failing: dict = field(default_factory=dict)
+    machines: list = field(default_factory=list)
+    binding_needed: bool = False
 
     @property
     def catalog(self):
@@ -75,6 +78,12 @@ def collect(window, *, fetch=False):
     snapshot.checkout = path
     snapshot.features, snapshot.errors = load_catalog(path, local_catalog(window))
     snapshot.machine = load_machine(path, snapshot.machine_name)
+    snapshot.machines = list_machines(path)
+    if "machine" not in window.settings and snapshot.machines:
+        # After a reinstall, ask which machine this is instead of guessing.
+        known = {info["name"]: info for info in snapshot.machines}
+        mine = known.get(snapshot.machine_name)
+        snapshot.binding_needed = not mine or bool(mine["install"] and mine["install"] != install_id())
     snapshot.ledger = Ledger(state_dir(window) / "applied.json")
     applier = make_applier(window, path, snapshot.ledger)
     if results_path(window).exists():
@@ -129,7 +138,8 @@ def save_machine(window, snapshot, publish):
     path.parent.mkdir(parents=True, exist_ok=True)
     version = Probe().omarchy()
     path.write_text(machine_text(snapshot.machine_name, snapshot.machine, hostname=platform.node(),
-                                 omarchy=version, updated=GLib.DateTime.new_now_utc().format_iso8601()))
+                                 omarchy=version, updated=GLib.DateTime.new_now_utc().format_iso8601(),
+                                 install=install_id()))
     if not publish:
         return None
     return checkout.publish(snapshot.checkout, window.settings.get("branch", ""), [path],
@@ -154,9 +164,15 @@ class FeaturesPage(Gtk.Box):
         self.filter.connect("notify::selected", lambda *_: self.render())
         tools.append(self.filter)
         self.append(tools)
-        self.machine_label = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        machine_row = Gtk.Box(spacing=8)
+        self.machine_label = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
         self.machine_label.add_css_class("muted")
-        self.append(self.machine_label)
+        machine_row.append(self.machine_label)
+        self.machines_button = Gtk.Button(label=tr('Manage machines'))
+        self.machines_button.add_css_class("flat")
+        self.machines_button.connect("clicked", lambda *_: self.show_machines())
+        machine_row.append(self.machines_button)
+        self.append(machine_row)
         self.banner = Gtk.Box(spacing=8, visible=False)
         self.banner.add_css_class("features-banner")
         self.banner_text = Gtk.Label(xalign=0, wrap=True, hexpand=True)
@@ -222,6 +238,8 @@ class FeaturesPage(Gtk.Box):
             self.window.migrate_catalog()
         elif self.banner_mode == "fix":
             self.window.ask_agent_about_catalog(self.snapshot.errors)
+        elif self.banner_mode == "machines":
+            self.show_machines()
 
     # Rendering ---------------------------------------------------------------
     def effective(self, feature):
@@ -236,8 +254,13 @@ class FeaturesPage(Gtk.Box):
         if not snapshot:
             return
         machine = snapshot.machine_name
-        self.machine_label.set_text(tr('On this machine: {name}', name=machine))
-        if snapshot.problem and not snapshot.catalog:
+        self.machine_label.set_text(tr('Machine not chosen yet') if snapshot.binding_needed
+                                    else tr('On this machine: {name}', name=machine))
+        self.machines_button.set_sensitive(bool(snapshot.checkout))
+        if snapshot.binding_needed:
+            self.show_banner(tr('This installation is not linked to a machine yet. Choose one to reuse its choices, or create a new one.'),
+                             "machines", tr('Choose machine'))
+        elif snapshot.problem and not snapshot.catalog:
             self.show_banner(tr('The repository could not be updated: {problem}', problem=snapshot.problem), None)
         elif not snapshot.catalog and not snapshot.features:
             self.show_banner(tr('This repository has no customizations catalog yet. The agent can create one from your current settings.'),
@@ -458,6 +481,9 @@ class FeaturesPage(Gtk.Box):
     def apply(self):
         if not self.staged or self.window.busy or not self.snapshot:
             return
+        if self.snapshot.binding_needed:
+            self.show_machines()
+            return
         snapshot, staged = self.snapshot, dict(self.staged)
         machine = snapshot.machine
         for identifier, entry in staged.items():
@@ -495,3 +521,171 @@ class FeaturesPage(Gtk.Box):
             self.window.failure(message)
             self.refresh()
         self.window.worker(work, done, failed)
+
+    # Machines --------------------------------------------------------------
+    def show_machines(self):
+        if not self.snapshot or not self.snapshot.checkout:
+            return
+        panel = self.window.make_panel(tr('Machines'))
+        self.machines_panel = panel
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        panel.set_content(content)
+        self.render_machines(content)
+        panel.present()
+
+    def render_machines(self, content, editing=None, confirming=None, message=""):
+        while content.get_first_child():
+            content.remove(content.get_first_child())
+        snapshot = self.snapshot
+        current = snapshot.machine_name
+        bound = "machine" in self.window.settings and not snapshot.binding_needed
+        intro = Gtk.Label(label=tr('Each installation uses the choices of one machine. After reinstalling, choose the same machine to get its choices back.'),
+                          xalign=0, wrap=True)
+        intro.add_css_class("muted")
+        content.append(intro)
+        if message:
+            note = Gtk.Label(label=message, xalign=0, wrap=True)
+            note.add_css_class("status-modified")
+            content.append(note)
+        names = [info["name"] for info in snapshot.machines]
+        machines = list(snapshot.machines)
+        if current not in names:
+            machines.insert(0, {"name": current, "hostname": "", "omarchy": "", "updated": "", "install": "",
+                                "on": 0, "off": 0, "unsaved": True})
+        busy = self.window.busy or self.loading
+        for info in machines:
+            name = info["name"]
+            mine = name == current and bound
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            row.add_css_class("feature-row")
+            head = Gtk.Box(spacing=8)
+            title = Gtk.Label(label=name, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
+            title.add_css_class("feature-title")
+            head.append(title)
+            if mine:
+                badge = Gtk.Label(label=tr('this installation'))
+                badge.add_css_class("feature-status")
+                badge.add_css_class("status-applied")
+                head.append(badge)
+            row.append(head)
+            details = []
+            if info.get("unsaved"):
+                details.append(tr('not saved yet'))
+            if info["hostname"]:
+                details.append(info["hostname"])
+            if info["omarchy"]:
+                details.append("Omarchy " + info["omarchy"])
+            if info["updated"]:
+                details.append(tr('updated {date}', date=info["updated"][:10]))
+            if not info.get("unsaved"):
+                details.append(tr('{on} on · {off} off', on=info["on"], off=info["off"]))
+            if info["install"] and info["install"] == install_id() and not mine:
+                details.append(tr('same installation as this one'))
+            line = Gtk.Label(label=" · ".join(details), xalign=0, wrap=True)
+            line.add_css_class("muted")
+            row.append(line)
+            actions = Gtk.Box(spacing=6)
+            if editing == name:
+                entry = Gtk.Entry(text=name, hexpand=True)
+                actions.append(entry)
+                save = Gtk.Button(label=tr('Save'))
+                save.add_css_class("suggested-action")
+                save.connect("clicked", lambda *_, old=name, field=entry: self.machine_action(
+                    content, "rename", old, field.get_text().strip()))
+                entry.connect("activate", lambda field, old=name: self.machine_action(content, "rename", old, field.get_text().strip()))
+                actions.append(save)
+                cancel = Gtk.Button(label=tr('Cancel'))
+                cancel.connect("clicked", lambda *_: self.render_machines(content))
+                actions.append(cancel)
+            elif confirming == name:
+                question = Gtk.Label(label=tr('Remove {name} from the repository?', name=name), xalign=0, hexpand=True, wrap=True)
+                actions.append(question)
+                remove = Gtk.Button(label=tr('Remove'))
+                remove.connect("clicked", lambda *_, n=name: self.machine_action(content, "remove", n))
+                actions.append(remove)
+                cancel = Gtk.Button(label=tr('Cancel'))
+                cancel.connect("clicked", lambda *_: self.render_machines(content))
+                actions.append(cancel)
+            else:
+                if not mine:
+                    use = Gtk.Button(label=tr('Use on this installation'))
+                    use.add_css_class("suggested-action")
+                    use.connect("clicked", lambda *_, n=name: self.machine_action(content, "use", n))
+                    actions.append(use)
+                if not info.get("unsaved"):
+                    rename = Gtk.Button(label=tr('Rename'))
+                    rename.connect("clicked", lambda *_, n=name: self.render_machines(content, editing=n))
+                    actions.append(rename)
+                    if not mine:
+                        remove = Gtk.Button(label=tr('Remove'))
+                        remove.connect("clicked", lambda *_, n=name: self.render_machines(content, confirming=n))
+                        actions.append(remove)
+            for child in list(_children(actions)):
+                if isinstance(child, (Gtk.Button, Gtk.Entry)):
+                    child.set_sensitive(not busy)
+            row.append(actions)
+            content.append(row)
+        create = Gtk.Box(spacing=6)
+        entry = Gtk.Entry(placeholder_text=tr('New machine name'), hexpand=True)
+        create.append(entry)
+        add = Gtk.Button(label=tr('Create and use'))
+        add.connect("clicked", lambda *_: self.machine_action(content, "create", entry.get_text().strip()))
+        entry.connect("activate", lambda *_: self.machine_action(content, "create", entry.get_text().strip()))
+        add.set_sensitive(not busy)
+        create.append(add)
+        content.append(create)
+
+    def machine_action(self, content, action, name, new=None):
+        snapshot = self.snapshot
+        if action == "create":
+            name, new = name.lower(), None
+        target = (new or "").lower() if action == "rename" else name
+        if action in ("rename", "create") and not valid_machine(target):
+            self.render_machines(content, editing=name if action == "rename" else None,
+                                 message=tr('Use lowercase letters, digits and hyphens.'))
+            return
+        if action == "create" and target in {info["name"] for info in snapshot.machines}:
+            self.render_machines(content, message=tr('A machine with this name already exists.'))
+            return
+        publish = self.window.publish.get_active()
+        branch = self.window.settings.get("branch", "")
+        def work():
+            paths = []
+            if action == "rename":
+                paths = rename_machine(snapshot.checkout, name, target)
+            elif action == "remove":
+                paths = remove_machine(snapshot.checkout, name)
+            elif action == "create":
+                path = machine_path(snapshot.checkout, target)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(machine_text(target, {}, hostname=platform.node(), omarchy=Probe().omarchy(),
+                                             updated=GLib.DateTime.new_now_utc().format_iso8601(), install=install_id()))
+                paths = [path]
+            if not paths or not publish:
+                return None
+            verb = {"rename": f"Rename machine {name} to {target}", "remove": f"Remove machine {name}",
+                    "create": f"Add machine {target}"}[action]
+            return checkout.publish(snapshot.checkout, branch, paths, verb)
+        def done(problem):
+            self.loading = False
+            settings = self.window.settings
+            if action in ("use", "create") or (action == "rename" and name == snapshot.machine_name):
+                settings["machine"] = target
+            self.window.save_settings()
+            if problem:
+                self.window.status.set_text(tr('Not published: {problem}', problem=problem.splitlines()[0][:160]))
+            if getattr(self, "machines_panel", None) in self.window.panels:
+                self.machines_panel.destroy()
+            self.refresh()
+        def failed(message):
+            self.loading = False
+            self.render_machines(content, message=message)
+        self.loading = True
+        self.window.worker(work, done, failed)
+
+
+def _children(widget):
+    child = widget.get_first_child()
+    while child:
+        yield child
+        child = child.get_next_sibling()

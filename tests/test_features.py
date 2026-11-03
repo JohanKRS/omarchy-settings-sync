@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'plugin'))
 from applier import Applier, Ledger, delegation, status
-from features import (Probe, desired, expand, load_catalog, load_machine, machine_text, ordered,
-                      part_enabled, machine_path)
+from features import (Probe, desired, expand, install_id, list_machines, load_catalog, load_machine,
+                      machine_path, machine_text, ordered, part_enabled, remove_machine, rename_machine)
 
 CATALOG = '''
 version = 1
@@ -194,6 +194,31 @@ class FeatureTest(unittest.TestCase):
         self.assertEqual(desired(self.by_id['lock-shortcut'], {}), 'on')
         profile = self.by_id['popups'].parts[2]
         self.assertFalse(part_enabled(self.by_id['popups'], profile, loaded))
+
+    def test_machines_can_be_listed_renamed_and_removed(self):
+        (self.repo / 'machines').mkdir()
+        record = {'features': {'idle': 'on', 'pdf': 'off'}, 'off': {}, 'parts': {}}
+        machine_path(self.repo, 'omarchy').write_text(
+            machine_text('omarchy', record, hostname='omarchy', omarchy='4.0.6-1', install='abc'))
+        machine_path(self.repo, 'laptop').write_text(machine_text('laptop', {}, hostname='laptop'))
+        machines = list_machines(self.repo)
+        self.assertEqual([m['name'] for m in machines], ['laptop', 'omarchy'])
+        self.assertEqual((machines[1]['on'], machines[1]['off'], machines[1]['install']), (1, 1, 'abc'))
+        paths = rename_machine(self.repo, 'omarchy', 'desktop')
+        self.assertEqual([p.name for p in paths], ['omarchy.toml', 'desktop.toml'])
+        self.assertEqual(load_machine(self.repo, 'desktop'), record)
+        self.assertIn('install = "abc"', machine_path(self.repo, 'desktop').read_text())
+        with self.assertRaises(ValueError):
+            rename_machine(self.repo, 'desktop', 'laptop')
+        with self.assertRaises(ValueError):
+            rename_machine(self.repo, 'desktop', 'Bad Name')
+        remove_machine(self.repo, 'laptop')
+        self.assertEqual([m['name'] for m in list_machines(self.repo)], ['desktop'])
+        machine_id = self.repo / 'machine-id'
+        machine_id.write_text('0123456789abcdef\n')
+        self.assertEqual(len(install_id(machine_id)), 16)
+        self.assertNotIn('0123456789abcdef', install_id(machine_id))
+        self.assertEqual(install_id(self.repo / 'missing'), '')
 
     def test_block_line_and_file_apply_idempotently_and_revert_exactly(self):
         bindings = self.config('hypr/bindings.lua')

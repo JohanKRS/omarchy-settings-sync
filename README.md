@@ -57,6 +57,10 @@ password once when needed, and calls the agent only for steps that need its
 judgment or for conflicts with local edits. See the
 [customizations catalog](docs/CONFIGURATION.md#customizations-catalog).
 
+**Manage machines** renames or removes machines in the repository. After a
+reinstall, the tab asks which machine this installation is, so its earlier
+choices come back.
+
 Repositories created before the catalog keep the agent-led Sync. Use
 **Customizations → Create catalog** to convert one.
 

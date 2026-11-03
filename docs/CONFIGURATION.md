@@ -90,9 +90,14 @@ and keep the current state, or restore the backup taken before it was first
 applied. A destination edited outside the plugin is shown as **Edited locally**
 and is never overwritten; the agent reconciles it.
 
-Choices are stored in `machines/<name>.toml`. The name defaults to the
-hostname and can be changed in Settings, so a reinstalled machine with the same
-name picks up its previous choices:
+Choices are stored in `machines/<name>.toml`. The name starts as the hostname.
+**Manage machines** in the Customizations tab lists every machine in the
+repository with its hostname, Omarchy version and last update, and lets you
+rename or remove one, create a new one, or link this installation to an
+existing machine. After a reinstall the tab asks which machine the new
+installation is, so you get its previous choices back; Sync waits for that
+answer. A short, non-reversible id derived from `/etc/machine-id` tells a new
+installation apart from the old one without publishing the machine id:
 
 ```toml
 name = "desktop"

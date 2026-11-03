@@ -14,7 +14,9 @@
 - With a catalog, **Sync** applies what is on for this machine without
   starting the agent unless needed. Repositories without a catalog keep the
   agent-led Sync; **Create catalog** asks the agent to convert them.
-- Name this machine in Settings so a reinstall picks up its earlier choices.
+- Manage machines from the Customizations tab: list, rename, remove or create
+  one, and link a reinstalled installation to its earlier machine. Sync waits
+  until a new installation is linked.
 
 ## 0.1.13 — 2026-10-27
 

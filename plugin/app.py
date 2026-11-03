@@ -1263,6 +1263,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
             snapshot = collect(self, fetch=True)
             if not snapshot.catalog:
                 return snapshot, None
+            if snapshot.binding_needed:
+                return snapshot, "choose-machine"
             return snapshot, run_changes(self, snapshot, changes_for_sync(snapshot))
         def done(result):
             snapshot, outcomes = result
@@ -1271,8 +1273,17 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.busy = False
                 self.submit(tr('Sync'), sync=True)
                 return
+            if outcomes == "choose-machine":
+                self.busy = False
+                self.update_buttons()
+                self.status.set_text(tr('Choose which machine this installation is, then sync again.'))
+                self.show_page("features")
+                return
             self.features_applied(snapshot, outcomes, snapshot.problem, sync=True)
         self.worker(work, done)
+
+    def make_panel(self, title):
+        return Panel(self, title)
 
     def show_page(self, name):
         self.pages.set_visible_child_name(name)
@@ -1285,6 +1296,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
     def features_applied(self, snapshot, outcomes, problem=None, sync=False):
         """Report a plugin-side apply and hand anything left to the agent."""
         self.busy = False
+        if "machine" not in self.settings:
+            self.settings["machine"] = snapshot.machine_name
+            self.save_settings()
         self.update_buttons()
         if any(outcome.delegated or outcome.errors for outcome in outcomes) or (sync and snapshot.errors):
             text = delegation(outcomes, results_path(self), machine=snapshot.machine_name,
@@ -1980,10 +1994,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         branch = Gtk.Entry(placeholder_text=tr('Default branch'))
         branch.set_text(self.settings.get("branch", ""))
         content.append(self.control(tr('Branch'), branch))
-        machine = Gtk.Entry(placeholder_text=machine_name({}))
-        machine.set_text(self.settings.get("machine", ""))
-        machine.set_tooltip_text(tr('Customizations turned on or off here are saved under this name in the repository.'))
-        content.append(self.control(tr('Name of this machine'), machine))
         is_claude = self.agent() == 'claude'
         modes = list(CLAUDE_PERMISSION_MODES) if is_claude else ["auto", "ask", "read"]
         mode = dropdown([tr('Auto review'), tr('Ask for approval'), tr('Accept edits'), tr('Plan mode')]
@@ -2012,10 +2022,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
             if changed:
                 self.new_chat()
             self.settings.update(repository=value, branch=branch_value)
-            if machine.get_text().strip():
-                self.settings["machine"] = machine_name({"machine": machine.get_text().strip()})
-            else:
-                self.settings.pop("machine", None)
             if self.agent() in NATIVE_AGENTS:
                 self.settings['claude_permissions' if is_claude else 'permissions'] = modes[mode.get_selected()]
             self.thread_loaded = False
@@ -2060,7 +2066,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             version_row.append(footer)
             dialog.append(version_row)
         if locked:
-            for widget in (repository, branch, machine, mode, existing, create):
+            for widget in (repository, branch, mode, existing, create):
                 widget.set_sensitive(False)
             error_label.set_text(tr('Finish the task and send or remove queued messages before changing settings.'))
             error_label.set_visible(True)

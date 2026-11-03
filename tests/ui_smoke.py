@@ -836,6 +836,24 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert 'idle = "on"' in (checkout_dir / f"machines/{page.snapshot.machine_name}.toml").read_text().replace('"idle"', "idle")
         assert window.pages.get_visible_child_name() == "chat"
         wait(lambda: not page.loading)
+        # Machines: create and link, rename the linked one, remove another.
+        page.refresh()
+        wait(lambda: not page.loading and page.snapshot.machines)
+        page.show_machines()
+        content = page.machines_panel.scroll.get_child().get_child() if hasattr(page.machines_panel.scroll.get_child(), "get_child") else page.machines_panel.scroll.get_child()
+        page.machine_action(content, "create", "laptop")
+        wait(lambda: window.settings.get("machine") == "laptop" and not page.loading)
+        assert (checkout_dir / "machines/laptop.toml").exists()
+        page.show_machines()
+        page.machine_action(content, "rename", "laptop", "work-laptop")
+        wait(lambda: window.settings.get("machine") == "work-laptop" and not page.loading)
+        assert not (checkout_dir / "machines/laptop.toml").exists()
+        other = next(info["name"] for info in page.snapshot.machines if info["name"] != "work-laptop")
+        page.show_machines()
+        page.machine_action(content, "remove", other)
+        wait(lambda: not page.loading and not (checkout_dir / f"machines/{other}.toml").exists())
+        if page.machines_panel in window.panels:
+            page.machines_panel.destroy()
         window.close_client()
         with patch.object(window, "quit_if_idle") as cleanup:
             window.popup_key(None, Gdk.KEY_Escape, 0, 0)
