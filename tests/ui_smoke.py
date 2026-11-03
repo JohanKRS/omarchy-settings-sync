@@ -791,10 +791,14 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert not window.replay_context
         window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
         window.setup()
+        assert window.pages.get_visible_child_name() == "settings" and window.settings_tab.get_active()
+        assert window.setup_panel.get_parent() is not None and not window.overlays(), "Settings is a tab, not an overlay"
         project_link = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.LinkButton))
         assert project_link.get_uri() == 'https://github.com/JohanKRS/omarchy-settings-sync'
         assert any(isinstance(w, Gtk.Label) and w.get_text() == 'v0.1.13' for w in widgets(project_link.get_parent()))
-        window.setup_panel.destroy()
+        window.popup_key(None, Gdk.KEY_Escape, 0, 0)
+        assert window.setup_panel not in window.panels and window.pages.get_visible_child_name() == "chat"
+        assert window.chat_tab.get_active() and window.get_visible()
         # Customizations tab: a local catalog renders, toggles stage, Apply
         # records the machine choice and hands unfinished parts to the agent.
         import subprocess

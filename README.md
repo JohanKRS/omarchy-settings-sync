@@ -128,7 +128,7 @@ URL. An empty branch uses the repository's default branch. See the
 | **?** in the bar | Codex or Claude is waiting for an answer or permission |
 | Stop icon, beside Send/Queue while working | Interrupt a native conversation, or send Ctrl+C to an embedded CLI |
 | Terminal icon | Open a companion shell in the workspace, including during a task |
-| Settings | Configure the repository and permissions; inspect or refresh the installed agent's models |
+| **Settings** tab, on the right | Configure the repository and permissions; inspect or refresh the installed agent's models |
 | **Settings → Review existing customizations** | Find portable system and app settings already on this machine and choose what to save to the configured repository |
 | **Continue conversation in terminal** | Resume an idle Codex/Claude conversation in its CLI |
 | History (clock icon) | Search local conversations and reopen one with its agent, repository, draft and queue |
@@ -260,8 +260,8 @@ repository and branch, model selection, unsent draft and image attachments.
 Switching never starts a model request or dispatches queued work; the restored
 queue stays paused until resumed. Finish or stop active work before switching.
 See the [conversation history preview](docs/history.png).
-The Settings gear is distinct from the app icon, and the installed version has
-a **GitHub** link to this project beside it.
+Settings is the tab on the right. Its **About** section shows the installed
+version with a **GitHub** link to this project.
 
 Archives from earlier versions did not store the native session ID or repository.
 They remain readable in History and are marked **Continue from saved transcript**.

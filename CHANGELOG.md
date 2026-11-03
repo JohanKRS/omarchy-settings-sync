@@ -21,6 +21,9 @@
 - **Remove from repository** undoes a customization here and asks the agent to
   delete it from the repository; other machines undo it on their next Sync from
   their own record, even after its files are gone.
+- Turn Settings into a tab on the right, after Conversation and Customizations,
+  with flat sections for the repository, agent, existing customizations and
+  version; Escape returns to the previous tab.
 - Move **Sync** from the header to the bottom of the Customizations tab, which
   shows how many updates are waiting. Opening the tab fetches the repository so
   the list is current, without applying anything.

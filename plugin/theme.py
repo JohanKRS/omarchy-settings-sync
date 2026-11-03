@@ -157,6 +157,7 @@ class Theme:
             .feature-chevron {{ color: alpha({fg}, .45); margin-top: 2px; }}
             .feature-group-row {{ margin: 18px 6px 4px; }}
             .feature-group-icon {{ opacity: .8; }}
+            .settings-error {{ color: {urgent}; }}
             .feature-row.release-affected {{ box-shadow: inset 2px 0 {release}; }}
             .release-label {{ color: {release}; font-size: {max(1, size - 1)}px; }}
             .features-notice.release-notice {{ border-left-color: {release}; background: alpha({release}, .08); }}
@@ -182,6 +183,7 @@ class Theme:
             .features-notice {{ background: alpha({accent}, .07); border-left: 2px solid {accent}; padding: 4px 4px 4px 12px; }}
             button.link-action {{ color: {accent}; padding: 2px 8px; min-height: 22px; }}
             button.machine-button {{ padding: 4px 10px; }}
+            button.inline-link {{ padding-left: 0; padding-right: 0; }}
             .feature-actions {{ margin-top: 4px; }}
             switch {{ background: alpha({fg}, .12); border: 1px solid alpha({fg}, .4);
                       border-radius: {radius}px; min-height: 20px; }}
