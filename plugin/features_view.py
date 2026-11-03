@@ -364,8 +364,8 @@ class FeaturesPage(Gtk.Box):
 
     # Data ------------------------------------------------------------------
     def refresh(self, fetch=None):
+        """Show the local copy at once, then fetch the repository in the background."""
         if fetch is None:
-            # Opening the tab shows the latest list without applying anything.
             fetch = not self.window.busy and time.monotonic() - self.fetched > 60
         if fetch:
             self.fetched = time.monotonic()
@@ -374,14 +374,41 @@ class FeaturesPage(Gtk.Box):
                 self.show_banner(tr('Choose a configuration repository in Settings.'), None)
             return
         self.loading = True
-        def done(snapshot):
+        def loaded(snapshot):
+            self.snapshot = snapshot
+            self.render()
+            if fetch and snapshot.checkout and (snapshot.checkout / ".git").exists():
+                self.bar_text.set_text(tr('Checking the repository…'))
+                self.window.worker(lambda: self.fetch_remote(snapshot), fetched, failed)
+            else:
+                self.loading = False
+                self.update_bar()
+        def fetched(result):
+            changed, problem = result
+            if changed:
+                self.window.worker(lambda: collect(self.window), loaded_after_fetch, failed)
+                return
+            self.loading = False
+            if problem:
+                self.snapshot.problem = problem
+                self.render()
+            self.update_bar()
+        def loaded_after_fetch(snapshot):
             self.loading = False
             self.snapshot = snapshot
             self.render()
         def failed(message):
             self.loading = False
             self.show_banner(message, None)
-        self.window.worker(lambda: collect(self.window, fetch=fetch), done, failed)
+            self.update_bar()
+        self.window.worker(lambda: collect(self.window), loaded, failed)
+
+    def fetch_remote(self, snapshot):
+        """Fast-forward the working copy. Returns (list changed, problem)."""
+        repository = self.window.settings["repository"]
+        _, sha, problem = checkout.update(self.window.locations["workspace"], repository,
+                                          self.window.settings.get("branch", ""))
+        return sha != snapshot.sha and not problem, problem
 
     def show_banner(self, text, mode, button=None):
         self.banner_mode = mode
