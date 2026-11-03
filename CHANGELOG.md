@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-11-03
 
 - New plugin icon in the bar, panel header and window: a toggle inside a sync
   loop that follows the bar colors, with a small dot while a reply is waiting.
@@ -32,7 +32,8 @@
   version; Escape returns to the previous tab.
 - Move **Sync** from the header to the bottom of the Customizations tab, which
   shows how many updates are waiting. Opening the tab fetches the repository so
-  the list is current, without applying anything.
+  the list is current, without applying anything; the local copy appears at
+  once and the fetch runs in the background.
 - With a catalog, **Sync** applies what is on for this machine without
   starting the agent unless needed. Repositories without a catalog keep the
   agent-led Sync; **Create catalog** asks the agent to convert them.

@@ -198,3 +198,18 @@ packaging. These local checks do not replace marketplace review.
 - [Official Omarchy shell reference](https://github.com/omacom/omarchy/blob/quattro/docs/omarchy-shell.md)
 - [Marketplace submission requirements](https://github.com/omacom/omarchy-plugin-marketplace/blob/main/SUBMISSION.md)
 - [Marketplace security baseline](https://github.com/omacom/omarchy-plugin-marketplace/blob/main/SECURITY.md)
+
+## Customizations catalog
+
+The 0.2.0 update was checked on Omarchy 4.0.6-1, GTK 4.24.1, Codex CLI 0.166.0
+and Claude Code 2.1.317. The portable suite contains 91 tests: catalog parsing
+and validation, every part kind's apply and revert (including byte-identical
+round trips of Omarchy's shell.json), one-prompt administrator batches, ledger
+orphans, machine registry operations, publishing only the machine file, the
+post-update review against shipped defaults, and release-tag self-updates
+against local Git fixtures. A real 35-item catalog was simulated on a clean home
+seeded from `/usr/share/omarchy/config`: 46 plugin parts applied without errors,
+20 were left for the agent, and turning everything off restored every file. The
+post-update review was exercised against the cached Omarchy 4.0.5-1 package.
+The graphical smoke test covers the Customizations, machines and Settings tabs.
+

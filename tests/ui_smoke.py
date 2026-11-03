@@ -805,7 +805,8 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert window.setup_panel.get_parent() is not None and not window.overlays(), "Settings is a tab, not an overlay"
         project_link = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.LinkButton))
         assert project_link.get_uri() == 'https://github.com/JohanKRS/omarchy-settings-sync'
-        assert any(isinstance(w, Gtk.Label) and w.get_text() == 'v0.1.13' for w in widgets(project_link.get_parent()))
+        version = json.loads((Path(__file__).resolve().parents[1] / 'manifest.json').read_text())['version']
+        assert any(isinstance(w, Gtk.Label) and w.get_text() == 'v' + version for w in widgets(project_link.get_parent()))
         window.popup_key(None, Gdk.KEY_Escape, 0, 0)
         assert window.setup_panel not in window.panels and window.pages.get_visible_child_name() == "chat"
         assert window.chat_tab.get_active() and window.get_visible()
