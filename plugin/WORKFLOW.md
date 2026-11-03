@@ -125,6 +125,77 @@ pending steps; other installations receive the change through Sync.
 When publishing is disabled, apply locally without publishing or updating the
 remote branch.
 
+## Customizations catalog
+
+When the configuration repository has `features.toml`, the panel shows one
+switch per customization and applies it per machine. The plugin applies the
+simple parts itself and sends you only what needs judgment or a conflict.
+
+- **One feature per behavior the user recognizes** ("Super+L locks the screen").
+  Fields: `id` (lowercase letters, digits, hyphens), `title` and `summary` in
+  the user's language, `app` (the application it belongs to, such as `firefox`
+  or `hyprland`; the panel groups by it), `group` (`system` for system-wide
+  settings without an app), `areas` (every area it touches),
+  `default` for other machines (`on`, `off` or `ask`), `when` conditions
+  (`package:`, `command:`, `path:`, `omarchy>=4.1`, `!` negates) and `requires`.
+  When creating a feature, ask with the question tool whether other machines
+  should turn it on, ask first, or skip it.
+- **Parts say what changes.** Prefer kinds the plugin applies and reverts
+  itself: `file` (whole file), `line`, `block` (a snippet the plugin wraps in
+  `>>> settings-sync <feature>/<part> >>>` markers; an existing identical
+  snippet is adopted), `json` (dotted keys in `values`), `ini` (keys of one
+  `section`; `format = "toml"` for simple TOML), `mime` (`types`),
+  `user-service`, `system-file` (under `/etc`, `/usr/lib`, `/usr/local` or
+  `/opt`) and `package` (`install`/`remove`). Administrator steps share one
+  password prompt. Use `agent` with `title` and `instructions` (a README path
+  or text) only for profile detection, hardware adaptation, downloads or other
+  judgment. Give optional parts an `id` and `optional = true`.
+- **Programs to install or remove** go in the `[[program]]` list, not in a
+  feature: `package`, optional `id`, `title`, `packages` (when several packages
+  belong together), `action` (`install` or `remove`), `aur = true` for AUR
+  packages or `instructions` for direct downloads, and `default` (usually
+  `ask`). Use a feature
+  with a `package` part only when the package is part of a larger setting.
+- **Keep features independent.** When behaviors share a file, split them: a
+  Hyprland module per feature with its own `require` line, a separate block per
+  snippet. Two features must not write the same keys or lines.
+- **Turning off must be exact.** The plugin removes its lines and blocks,
+  returns keys to the Omarchy default (`/usr/share/omarchy/config`) or the
+  previous value, deletes files it created, and restores removed base packages
+  listed in `install/omarchy-base.packages`. Do not rely on other cleanup.
+- **Machine choices** live in `machines/<name>.toml`: `[features]` with
+  `"on"`/`"off"`, `[off]` with `"keep"` or `"previous"`, and `[parts]` with
+  `"<feature>.<part id>" = "off"`. A machine without a file, or with
+  `defaults = "ask"`, is new: features it has not chosen stay off and appear as
+  new until the user turns them on. Set a feature you create here to `"on"`
+  for this machine only. Do not edit other machines' files unless asked. The panel
+  renames, removes and links machines; keep `name` equal to the file name.
+- **Local only.** With publishing disabled, add the feature to the local
+  catalog named in the request (sources in a `local/` folder beside it), not
+  to the repository.
+- **Validate** with `python3 <plugin>/plugin/features.py validate <checkout>`
+  before publishing. Keep SYNC.md as human documentation; the catalog is the
+  inventory the plugin uses.
+- **Delegated work.** A request titled "APLICAR CONFIGURAÇÕES DO CATÁLOGO" lists
+  only the parts left for you. Apply or revert those, resolve listed conflicts
+  without discarding local edits, then write the result file it names.
+- **Removing a customization.** A request titled "REMOVER PERSONALIZAÇÃO DO
+  REPOSITÓRIO" authorizes deleting that feature everywhere: its catalog entry,
+  source files used only by it, its documentation and machine entries. The
+  plugin already undid it locally and undoes it on other machines at Sync.
+- **After an Omarchy update.** A request titled "AJUSTAR APÓS ATUALIZAÇÃO DO
+  OMARCHY" includes the changed defaults for one customization. Explain briefly
+  what changed, adapt the customization only as much as needed, validate, and
+  update the catalog when the adaptation is portable.
+- **Sync with a catalog** is run by the plugin. You are called only for the
+  parts it could not finish. Without a catalog, follow the Sync section above.
+
+To create the catalog for an existing repository, convert every component
+of the inventory, split shared files without changing behavior, apply the
+split locally and validate it, and record this machine's current state in
+its machine file, with an explicit `on` for what is applied and `off` for what
+is not or does not apply here.
+
 ## Publication and data
 
 Use only the configured URL and branch. Preserve repository visibility. Advance

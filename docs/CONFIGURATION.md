@@ -38,6 +38,137 @@ next to the component they configure. In `SYNC.md`, document:
 - Hardware requirements, optional components and machine-specific overrides.
 - How to undo the change using the local backup.
 
+## Customizations catalog
+
+A `features.toml` file at the root turns each customization into a switch in
+the panel's **Customizations** tab. Each machine turns features on or off
+independently, and Sync applies only what is on for that machine. In a
+repository without a catalog, the tab offers **Create catalog**, which asks the
+agent to convert the existing inventory; afterwards the agent keeps the catalog current whenever it creates
+or changes a setting.
+
+```toml
+version = 1
+
+[[feature]]
+id = "lock-shortcut"
+title = "Super+L locks the screen"
+summary = "Super+Ctrl+L toggles the workspace layout."
+app = "hyprland"             # the panel groups customizations by app
+areas = ["hyprland"]         # every area it touches
+default = "on"               # for other machines: on, off or ask
+when = ["command:hyprctl"]   # package:, command:, path:, omarchy>=4.1; ! negates
+
+[[feature.part]]
+kind = "block"
+dest = "~/.config/hypr/bindings.lua"
+source = "desktop/hyprland/lock-bindings.lua"
+
+[[feature]]
+id = "idle-timers"
+title = "Screensaver after 5 minutes, lock after 10"
+group = "desktop"
+
+[[feature.part]]
+kind = "json"
+dest = "~/.config/omarchy/shell.json"
+values = { "idle.screensaver" = 300, "idle.lock" = 600 }
+```
+
+Programs that are only installed or removed do not need a feature. List them
+under `[[program]]`; each one gets a simple switch in the **Programs** group:
+
+```toml
+[[program]]
+package = "papers"
+title = "Papers"
+
+[[program]]
+package = "libreoffice-fresh"
+title = "LibreOffice"
+action = "remove"
+
+[[program]]
+package = "artcraft-launcher"
+aur = true                   # installed by the agent with omarchy pkg aur add
+
+[[program]]
+id = "office-removed"        # optional; keeps machine choices when converting a feature
+package = "libreoffice-fresh"
+packages = ["libreoffice-fresh", "libreoffice-still"]
+action = "remove"
+
+[[program]]
+package = "ai.storyteller.artcraft-launcher"
+instructions = "apps/craft-launcher/README.md"   # a direct download the agent installs
+```
+
+Customizations name their `app` (such as `firefox` or `hyprland`); the panel
+groups by it. Settings with `group = "system"` and no app are listed under
+System.
+
+| Part kind | Applied by | Turning off |
+| --- | --- | --- |
+| `file` | Plugin | Restores the Omarchy default or deletes the file it created |
+| `line`, `block` | Plugin, inside markers | Removes the line or block |
+| `json`, `ini` (`format = "toml"` for simple TOML), `mime` | Plugin | Returns each key to the Omarchy default or its previous value |
+| `user-service` | Plugin | Disables the unit if the plugin enabled it |
+| `system-file`, `package` | Plugin, one password prompt | Removes the file or restores the backup; restores base packages |
+| `agent` | The agent, with `instructions` | The agent, with the recorded state |
+
+Optional parts have an `id` and `optional = true` and get their own switch.
+When turning a feature off you can return to the Omarchy default, stop syncing
+and keep the current state, or restore the backup taken before it was first
+applied. A destination edited outside the plugin is shown as **Edited locally**
+and is never overwritten; the agent reconciles it.
+
+Choices are stored in `machines/<name>.toml`. The name starts as the hostname.
+**Manage machines** in the Customizations tab lists every machine in the
+repository with its hostname, Omarchy version and last update, and lets you
+rename or remove one, create a new one, or link this installation to an
+existing machine. After a reinstall the tab asks which machine the new
+installation is: use its previous choices, or **Start fresh** to keep the name
+but clear its choices. Sync waits for that answer. A new or fresh machine
+installs nothing by itself: every customization starts as **New** until you
+turn it on, one by one or with **Turn all on**, and apply. A short, non-reversible id derived from `/etc/machine-id` tells a new
+installation apart from the old one without publishing the machine id:
+
+```toml
+name = "desktop"
+
+[features]
+"printing-filter" = "off"
+
+[off]
+"lock-shortcut" = "keep"     # default, keep or previous
+
+[parts]
+"firefox-popups.profile-module" = "off"
+```
+
+**Remove from repository**, in a customization's details, deletes it
+everywhere: the panel undoes it on this machine, returning to the Omarchy
+default, and asks the agent to delete its catalog entry, its source files, its
+documentation and its machine entries, then publish. Every other machine
+undoes it on its next Sync, using its own record of what was applied.
+
+### After an Omarchy update
+
+The panel remembers which Omarchy version each machine last reviewed. When the
+version changes, it compares the defaults in `/usr/share/omarchy` that each
+customization depends on with the previous version, read from pacman's package
+cache or from a copy saved at the last review. Affected customizations are
+marked in the list, with a **Changed by Omarchy** filter. Their details show
+the changed default values and files, and offer **Keep mine**, **Use the new
+default** (turn it off and return to Omarchy's default) or **Adjust with the
+agent**, which opens the conversation with the differences attached. A
+customization whose value Omarchy now uses by default is marked as one you can
+turn off; Hyprland configuration errors after the update are flagged too.
+
+Validate a catalog with `python3 plugin/features.py validate <repository>`.
+Customizations saved with **Push changes** disabled go to a local catalog on
+that machine and are marked **this machine only**.
+
 ## What to share
 
 Share preferences that make sense on another installation: application settings,

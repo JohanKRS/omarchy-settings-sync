@@ -791,10 +791,122 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert not window.replay_context
         window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
         window.setup()
+        assert window.pages.get_visible_child_name() == "settings" and window.settings_tab.get_active()
+        # Updates: the switch is saved, and a check with automatic updates off only reports.
+        auto = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.Switch))
+        auto.set_active(False)
+        assert window.settings["auto_update"] is False
+        window.updater.fetch = lambda: {"tag": "v9.9.9", "version": "9.9.9", "url": "", "notes": ""}
+        window.updater.path = Path(env["XDG_STATE_HOME"]) / "update.json"
+        window.check_updates(force=True)
+        wait(lambda: not window.update_checking)
+        assert "9.9.9" in window.update_label.get_text() and window.update_now.get_visible()
+        assert "installed" not in window.updater.state
+        assert window.setup_panel.get_parent() is not None and not window.overlays(), "Settings is a tab, not an overlay"
         project_link = next(w for w in widgets(window.setup_panel) if isinstance(w, Gtk.LinkButton))
         assert project_link.get_uri() == 'https://github.com/JohanKRS/omarchy-settings-sync'
-        assert any(isinstance(w, Gtk.Label) and w.get_text() == 'v0.1.13' for w in widgets(project_link.get_parent()))
-        window.setup_panel.destroy()
+        version = json.loads((Path(__file__).resolve().parents[1] / 'manifest.json').read_text())['version']
+        assert any(isinstance(w, Gtk.Label) and w.get_text() == 'v' + version for w in widgets(project_link.get_parent()))
+        window.popup_key(None, Gdk.KEY_Escape, 0, 0)
+        assert window.setup_panel not in window.panels and window.pages.get_visible_child_name() == "chat"
+        assert window.chat_tab.get_active() and window.get_visible()
+        # Customizations tab: a local catalog renders, toggles stage, Apply
+        # records the machine choice and hands unfinished parts to the agent.
+        import subprocess
+        import features_view
+        from applier import Outcome
+        checkout_dir = Path(env["XDG_DATA_HOME"]) / "omarchy-agent-settings/workspace/repository"
+        checkout_dir.mkdir(parents=True, exist_ok=True)
+        (checkout_dir / "features.toml").write_text(
+            '[[feature]]\nid = "lock"\ntitle = "Super+L locks"\ngroup = "desktop"\n'
+            '[[feature.part]]\nkind = "agent"\ntitle = "Check"\ninstructions = "Do it"\n'
+            '[[feature]]\nid = "idle"\ntitle = "Idle"\ndefault = "ask"\n'
+            '[[feature.part]]\nkind = "agent"\ntitle = "Idle"\ninstructions = "Do it"\n')
+        subprocess.run(["git", "init", "-q", str(checkout_dir)], check=True)
+        subprocess.run(["git", "-C", str(checkout_dir), "remote", "add", "origin", window.settings["repository"]], check=True)
+        page = window.features_page
+        page.fetched = time.monotonic()  # The fixture's remote is fictional; never fetch it.
+        assert window.sync_button is page.sync_button, "Sync lives in the Customizations tab"
+        window.show_page("features")
+        wait(lambda: page.snapshot is not None and page.snapshot.features)
+        # No machine file yet: a new installation applies nothing until chosen.
+        assert page.snapshot.labels == {"lock": "new", "idle": "new"}, page.snapshot.labels
+        switches = [w for w in widgets(page.listing) if isinstance(w, Gtk.Switch)]
+        assert [s.get_active() for s in switches] == [False, False]
+        switches[1].set_active(True)
+        wait(lambda: page.apply_button.get_visible())
+        assert not page.sync_button.get_visible()
+        page.discard()
+        assert not page.staged and page.sync_button.get_visible() and not page.apply_button.get_visible()
+        idle = next(f for f in page.snapshot.features if f.id == "idle")
+        page.toggled(idle, True)
+        wait(lambda: page.apply_button.get_visible())
+        def fake_run(win, snapshot, changes):
+            return [Outcome(feature, action, mode, delegated=[{"part": feature.parts[0], "action": action, "reason": "needs the agent"}])
+                    for feature, action, mode in changes]
+        window.publish.set_active(False)  # Never push from the fixture.
+        with patch.object(features_view, "run_changes", side_effect=fake_run), patch.object(window, "submit", return_value=True) as handoff, \
+                patch.object(features_view.checkout, "publish") as push:
+            page.apply_button.emit("clicked")
+            wait(lambda: handoff.called)
+            assert handoff.call_args.kwargs["features_task"].startswith("APLICAR")
+            assert "idle" in handoff.call_args.kwargs["features_task"]
+            push.assert_not_called()
+        assert 'idle = "on"' in (checkout_dir / f"machines/{page.snapshot.machine_name}.toml").read_text().replace('"idle"', "idle")
+        assert window.pages.get_visible_child_name() == "chat"
+        wait(lambda: not page.loading)
+        # Machines: create and link, rename the linked one, remove another.
+        window.show_page("features")
+        wait(lambda: not page.loading and page.snapshot.machines)
+        page.show_machines()
+        content = page.machines_content
+        assert page.showing_machines and not window.panels, "Machines is a screen of the tab, not an overlay card"
+        window.popup_key(None, Gdk.KEY_Escape, 0, 0)
+        assert not page.showing_machines and window.get_visible()
+        page.show_machines()
+        page.machine_action(content, "create", "laptop")
+        wait(lambda: window.settings.get("machine") == "laptop" and not page.loading)
+        assert (checkout_dir / "machines/laptop.toml").exists()
+        page.show_machines()
+        page.machine_action(content, "rename", "laptop", "work-laptop")
+        wait(lambda: window.settings.get("machine") == "work-laptop" and not page.loading)
+        assert not (checkout_dir / "machines/laptop.toml").exists()
+        other = next(info["name"] for info in page.snapshot.machines if info["name"] != "work-laptop")
+        (checkout_dir / f"machines/{other}.toml").write_text(
+            f'name = "{other}"\ninstall = "old-install"\n\n[features]\nidle = "on"\n')
+        page.show_machines()
+        page.machine_action(content, "fresh", other)
+        wait(lambda: window.settings.get("machine") == other and not page.loading)
+        fresh = (checkout_dir / f"machines/{other}.toml").read_text()
+        assert "idle" not in fresh and "old-install" not in fresh and 'defaults = "ask"' in fresh, fresh
+        wait(lambda: page.snapshot.machine_name == other and not page.loading)
+        assert set(page.snapshot.labels.values()) == {"new"}, page.snapshot.labels
+        assert page.undecided.get_visible()
+        page.decide_new("on")
+        assert {e["state"] for e in page.staged.values()} == {"on"} and page.apply_button.get_visible()
+        page.discard()
+        page.show_machines()
+        page.machine_action(content, "use", "work-laptop")
+        wait(lambda: window.settings.get("machine") == "work-laptop" and not page.loading)
+        page.show_machines()
+        page.machine_action(content, "remove", other)
+        wait(lambda: not page.loading and not (checkout_dir / f"machines/{other}.toml").exists())
+        page.hide_machines()
+        # Removing a customization undoes it here and asks the agent to delete it from the repository.
+        page.refresh()
+        wait(lambda: not page.loading and page.snapshot.features)
+        lock = next(f for f in page.snapshot.features if f.id == "lock")
+        page.expanded.add("lock")
+        page.ask_removal(lock)
+        wait(lambda: any(isinstance(w, Gtk.Button) and w.get_label() == tr("Remove everywhere") for w in widgets(page.listing)))
+        with patch.object(window, "submit", return_value=True) as removal_request:
+            page.remove(lock)
+            wait(lambda: removal_request.called)
+            assert removal_request.call_args.kwargs["publish"] is True
+            assert removal_request.call_args.kwargs["features_task"].startswith("REMOVER")
+        machine_file = checkout_dir / f"machines/{page.snapshot.machine_name}.toml"
+        assert '"lock" = "off"' in machine_file.read_text() or 'lock = "off"' in machine_file.read_text(), machine_file.read_text()
+        wait(lambda: not window.busy)
         window.close_client()
         with patch.object(window, "quit_if_idle") as cleanup:
             window.popup_key(None, Gdk.KEY_Escape, 0, 0)
@@ -824,4 +936,4 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         GLib.source_remove(window.theme_timer)
         GLib.source_remove(window.attention_timer)
         window.destroy()
-print("UI smoke passed: layout, questions, resume, cancellation, native queues and steering, acknowledgement races, all external queues, terminal, settings, dismissal")
+print("UI smoke passed: layout, questions, resume, cancellation, native queues and steering, acknowledgement races, all external queues, terminal, settings, customizations, dismissal")

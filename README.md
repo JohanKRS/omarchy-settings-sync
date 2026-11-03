@@ -41,9 +41,34 @@ Examples use synthetic data.
    enable **Push changes** when you want the agent to update that repository.
 3. **On another Omarchy installation**, install the plugin, authenticate your
    chosen agent and Git account, and select the same repository and branch.
-4. Click **Sync**. The agent compares the repository with that installation,
+4. Open **Customizations** and click **Sync**. The agent compares the repository with that installation,
    preserves local changes, adapts hardware-specific settings, and applies and
    tests compatible components. Repeat Sync when you want to receive updates.
+
+### Turn customizations on or off per machine
+
+The **Customizations** tab lists every setting saved in your repository, with
+a switch and its state on this machine. Settings that span several apps, such
+as a Hyprland rule plus a Firefox module, switch as one. Changes are staged
+until **Apply**; turning one off can return it to the Omarchy default, keep it
+as it is, or restore the earlier backup. **Remove from repository** deletes one
+everywhere: other machines undo it on their next Sync. The panel applies files, snippets,
+keys, MIME defaults, services and packages itself, asking for the administrator
+password once when needed, and calls the agent only for steps that need its
+judgment or for conflicts with local edits. See the
+[customizations catalog](docs/CONFIGURATION.md#customizations-catalog).
+
+**Manage machines** renames or removes machines in the repository. After a
+reinstall, the tab asks which machine this installation is: bring back its
+earlier choices, or start it fresh. A new or fresh machine installs nothing
+until you pick which customizations to turn on.
+
+After an Omarchy update, customizations whose Omarchy defaults changed are
+highlighted with what changed and quick actions: keep yours, use the new
+default, or adjust with the agent.
+
+Repositories created before the catalog keep the agent-led Sync. Use
+**Customizations → Create catalog** to convert one.
 
 This is an agent-assisted, on-demand workflow. It does not continuously mirror
 files or run a background sync daemon. The [sync workflow](plugin/WORKFLOW.md)
@@ -73,7 +98,7 @@ For a private GitHub configuration repository, set up authentication using
 omarchy plugin add https://github.com/JohanKRS/omarchy-settings-sync.git --enable
 ```
 
-Open the settings icon in the bar. On first launch, missing GTK dependencies
+Open the Omarchy Settings Sync icon in the bar. On first launch, missing GTK dependencies
 are installed through `omarchy pkg add` in a visible terminal; the package
 manager may request your administrator password. Agent CLIs are installed
 separately through Omarchy's agent menu.
@@ -86,9 +111,10 @@ URL. An empty branch uses the repository's default branch. See the
 
 | Control | Behavior |
 | --- | --- |
-| Settings icon, left click | Open or hide the panel; reveal a pending question |
-| Settings icon, right click | No action |
-| **Sync** | Ask the agent to sync the configured repository onto this installation |
+| Bar icon, left click | Open or hide the panel; reveal a pending question |
+| Bar icon, right click | No action |
+| **Conversation / Customizations** tabs | Talk to the agent, or switch individual customizations on and off for this machine |
+| **Sync**, at the bottom of Customizations | Apply repository updates to what is on for this machine; without a catalog, ask the agent to sync |
 | Message field | Request a specific change; optionally publish its reusable configuration |
 | **Enter / Send / Queue** | The same button sends when idle and queues while an agent is working |
 | Queue above the message field | Compact one-line previews with **Direct now / Send now**, **Edit** and **Remove** icons; pause/resume beside the count |
@@ -102,7 +128,7 @@ URL. An empty branch uses the repository's default branch. See the
 | **?** in the bar | Codex or Claude is waiting for an answer or permission |
 | Stop icon, beside Send/Queue while working | Interrupt a native conversation, or send Ctrl+C to an embedded CLI |
 | Terminal icon | Open a companion shell in the workspace, including during a task |
-| Settings | Configure the repository and permissions; inspect or refresh the installed agent's models |
+| **Settings** tab, on the right | Configure the repository and permissions; inspect or refresh the installed agent's models |
 | **Settings → Review existing customizations** | Find portable system and app settings already on this machine and choose what to save to the configured repository |
 | **Continue conversation in terminal** | Resume an idle Codex/Claude conversation in its CLI |
 | History (clock icon) | Search local conversations and reopen one with its agent, repository, draft and queue |
@@ -217,9 +243,16 @@ omarchy plugin enable community.agent-settings
 omarchy plugin remove community.agent-settings
 ```
 
-Finish or stop active work before updating or removing the plugin. Updates use
-the repository's default branch through Omarchy's normal updater; no agent is
-needed. Local edits in the installed checkout can prevent a fast-forward update.
+The plugin also updates itself. Once a day it checks this project's latest
+GitHub release and, when the panel is idle, fast-forwards the installed copy
+to that release's tag, never to unreleased commits. The new version loads the
+next time the panel starts. **Settings → About** shows the state, has
+**Check now**, and an **Update automatically** switch. A copy on another branch
+or with local edits is left alone.
+
+Finish or stop active work before updating or removing the plugin. Manual
+updates use the repository's default branch through Omarchy's normal updater;
+no agent is needed. Local edits in the installed checkout can prevent a fast-forward update.
 Disabling the bar widget hides its panel; active tasks are preserved.
 For predictable shutdown, finish them first. Removal preserves your configuration
 repository and local plugin data.
@@ -234,8 +267,8 @@ repository and branch, model selection, unsent draft and image attachments.
 Switching never starts a model request or dispatches queued work; the restored
 queue stays paused until resumed. Finish or stop active work before switching.
 See the [conversation history preview](docs/history.png).
-The Settings gear is distinct from the app icon, and the installed version has
-a **GitHub** link to this project beside it.
+Settings is the tab on the right. Its **About** section shows the installed
+version with a **GitHub** link to this project.
 
 Archives from earlier versions did not store the native session ID or repository.
 They remain readable in History and are marked **Continue from saved transcript**.
@@ -260,6 +293,7 @@ filenames. Other CLIs keep their own naming behavior.
 | `~/.local/state/omarchy-agent-settings/attachments/` | Private pasted PNG images; retained until local state is removed |
 | `~/.local/state/omarchy-agent-settings/outbox.json` | Unsent follow-ups, including messages with unconfirmed delivery |
 | `~/.local/share/omarchy-agent-settings/workspace/` | Working copies of configuration repositories |
+| `~/.local/state/omarchy-agent-settings/repositories/<id>/applied.json` | What the panel applied on this machine, for exact removal |
 
 The corresponding `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_DATA_HOME` overrides
 are supported. These files are not part of the plugin repository. Your agent

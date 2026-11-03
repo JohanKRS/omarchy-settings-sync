@@ -28,6 +28,9 @@ def palette(directory=None):
         "foreground": color(surface.get("text"), color(colors.get("foreground"), "#cacccc")),
         "accent": color(colors.get("accent", colors.get("color4")), "#cacccc"),
         "urgent": color(colors.get("red", colors.get("color1")), "#a55555"),
+        "good": color(colors.get("green", colors.get("color2")), "#7fae7f"),
+        "warning": color(colors.get("yellow", colors.get("color3")), "#c9a554"),
+        "release": color(colors.get("magenta", colors.get("color5")), "#b48ead"),
         "font": shell.get("font", {}),
         "controls": shell.get("controls", shell.get("style", {})),
         "spacing": shell.get("spacing", {}),
@@ -56,6 +59,7 @@ class Theme:
             return True
         self.previous = values
         fg, bg, accent = values["foreground"], values["background"], values["accent"]
+        good, warning, urgent, release = values["good"], values["warning"], values["urgent"], values["release"]
         fonts, controls = values["font"], values["controls"]
         size = max(1, int(fonts.get("body", fonts.get("base-size", 12))))
         title = max(1, int(fonts.get("title", round(size * 1.167))))
@@ -139,6 +143,63 @@ class Theme:
             textview text selection, entry selection {{ background: alpha({accent}, .35); }}
             .muted, .status {{ color: alpha({fg}, .65); opacity: 1; }}
             .panel {{ border: 1px solid alpha({fg}, .3); border-radius: {radius}px; padding: 14px; }}
+            .view-tabs {{ padding: 6px 14px 0; border-bottom: 1px solid alpha({fg}, .12); }}
+            .view-tabs button {{ background: transparent; border: none; border-radius: 0; box-shadow: none;
+                                 border-bottom: 2px solid transparent; padding: 4px 2px; margin-right: 16px;
+                                 color: alpha({fg}, .65); min-height: 24px; }}
+            .view-tabs button:hover {{ color: {fg}; background: transparent; }}
+            .view-tabs button:checked {{ color: {fg}; border-bottom-color: {accent}; background: transparent; }}
+            .feature-row {{ border-bottom: 1px solid alpha({fg}, .08); padding: 12px 6px; }}
+            .feature-row:hover, .feature-row.expanded {{ background: alpha({fg}, .03); }}
+            .feature-row.unavailable {{ opacity: .55; }}
+            .feature-title {{ font-weight: 600; }}
+            .feature-subtitle {{ font-size: {max(1, size - 1)}px; color: alpha({fg}, .6); }}
+            .feature-chevron {{ color: alpha({fg}, .45); margin-top: 2px; }}
+            .feature-group-row {{ margin: 18px 6px 4px; }}
+            .feature-group-icon {{ opacity: .8; }}
+            .settings-error {{ color: {urgent}; }}
+            .feature-row.release-affected {{ box-shadow: inset 2px 0 {release}; }}
+            .release-label {{ color: {release}; font-size: {max(1, size - 1)}px; }}
+            .features-notice.release-notice {{ border-left-color: {release}; background: alpha({release}, .08); }}
+            .release-diff {{ font-family: monospace; font-size: {max(1, size - 2)}px; color: alpha({fg}, .75);
+                             background: alpha({fg}, .04); padding: 6px 8px; }}
+            .program-row {{ padding: 8px 6px; }}
+            .program-install {{ color: alpha({good}, .85); }}
+            .program-remove {{ color: alpha({urgent}, .85); }}
+            .feature-group {{ font-size: {max(1, size - 2)}px; font-weight: 600; letter-spacing: 1px;
+                              color: alpha({fg}, .55); }}
+            .feature-count {{ font-size: {max(1, size - 2)}px; color: alpha({fg}, .4); }}
+            .feature-section {{ font-size: {max(1, size - 2)}px; font-weight: 600; letter-spacing: 1px;
+                                color: alpha({fg}, .5); margin-top: 6px; }}
+            .feature-details {{ margin: 2px 0 2px 26px; padding-left: 12px; border-left: 2px solid alpha({accent}, .3); }}
+            .feature-status {{ font-size: {max(1, size - 1)}px; color: alpha({fg}, .7); }}
+            .status-dot {{ font-size: {max(1, size - 4)}px; }}
+            .status-dot.status-applied {{ color: {good}; }}
+            .status-dot.status-pending, .status-dot.status-staged {{ color: {warning}; }}
+            .status-dot.status-modified {{ color: {urgent}; }}
+            .status-dot.status-off, .status-dot.status-unavailable {{ color: alpha({fg}, .35); }}
+            .feature-pill {{ font-size: {max(1, size - 2)}px; color: {accent}; background: alpha({accent}, .14);
+                             padding: 1px 8px; border-radius: {max(radius, 4)}px; }}
+            .features-notice {{ background: alpha({accent}, .07); border-left: 2px solid {accent}; padding: 4px 4px 4px 12px; }}
+            button.link-action {{ color: {accent}; padding: 2px 8px; min-height: 22px; }}
+            button.machine-button {{ padding: 4px 10px; }}
+            button.inline-link {{ padding-left: 0; padding-right: 0; }}
+            .feature-actions {{ margin-top: 4px; }}
+            switch {{ background: alpha({fg}, .12); border: 1px solid alpha({fg}, .4);
+                      border-radius: {radius}px; min-height: 20px; }}
+            switch:checked {{ background: alpha({accent}, .35); border-color: {accent}; }}
+            switch slider {{ background: alpha({fg}, .75); border-radius: {radius}px;
+                             min-width: 18px; min-height: 18px; box-shadow: none; }}
+            switch:checked slider {{ background: {accent}; }}
+            switch:disabled {{ opacity: .4; }}
+            radio {{ background: {bg}; border: 1px solid alpha({fg}, .4); }}
+            radio:checked {{ background: {accent}; color: {bg}; border-color: {accent}; }}
+            .features-banner {{ border-left: 2px solid {warning}; background: alpha({warning}, .06);
+                                padding: 6px 6px 6px 12px; }}
+            .pending-bar {{ border-top: 1px solid alpha({fg}, .16); padding-top: 8px; }}
+            button.destructive {{ color: {urgent}; border-color: alpha({urgent}, .6); }}
+            button.flat.destructive {{ border-color: transparent; }}
+            button.destructive:hover:not(:disabled) {{ background: alpha({urgent}, .12); }}
         """.encode())
         if self.window.vte:
             def rgba(value):

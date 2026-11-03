@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.2.0 — 2026-11-03
+
+- New plugin icon in the bar, panel header and window: a toggle inside a sync
+  loop that follows the bar colors, with a small dot while a reply is waiting.
+- Add a **Customizations** tab with a switch per customization saved in the
+  configuration repository, grouped by area, searchable and filterable by state.
+  Flat rows with expandable details, colored state dots and quiet actions follow
+  the active Omarchy theme, light or dark. Customizations are grouped by app,
+  with programs to install or uninstall in their own list of simple switches.
+  Choices are staged until **Apply** and saved per machine under `machines/`.
+- Read customizations from a `features.toml` catalog. The panel applies and
+  reverts files, lines, marked blocks, JSON/INI/TOML keys, MIME defaults, user
+  services, system files and packages itself, with one password prompt, and
+  hands judgment steps and conflicts with local edits to the agent.
+- Turning a customization off returns it to the Omarchy default, keeps it as
+  it is, or restores the earlier backup. Optional parts have their own switch.
+- After an Omarchy update, mark the customizations whose Omarchy defaults
+  changed, comparing with the previous package in pacman's cache. Show the
+  changed values and files, with Keep mine, Use the new default and Adjust with
+  the agent, and a Changed by Omarchy filter.
+- **Remove from repository** undoes a customization here and asks the agent to
+  delete it from the repository; other machines undo it on their next Sync from
+  their own record, even after its files are gone.
+- Update the plugin automatically from GitHub releases: check once a day, and
+  while idle fast-forward a clean default-branch install to the latest release
+  tag, never to unreleased commits. Settings shows the state, with Check now,
+  Update now and an Update automatically switch.
+- Turn Settings into a tab on the right, after Conversation and Customizations,
+  with flat sections for the repository, agent, existing customizations and
+  version; Escape returns to the previous tab.
+- Move **Sync** from the header to the bottom of the Customizations tab, which
+  shows how many updates are waiting. Opening the tab fetches the repository so
+  the list is current, without applying anything; the local copy appears at
+  once and the fetch runs in the background.
+- With a catalog, **Sync** applies what is on for this machine without
+  starting the agent unless needed. Repositories without a catalog keep the
+  agent-led Sync; **Create catalog** asks the agent to convert them.
+- Manage machines from the Customizations tab: list, rename, remove or create
+  one, and link a reinstalled installation to its earlier machine or start it
+  fresh. Sync waits until a new installation is linked. New and fresh machines
+  install nothing until you choose: every customization starts as **New**, and
+  a brand-new machine offers **Turn all on**.
+
 ## 0.1.13 — 2026-10-27
 
 - Browse and search local conversation history, then resume a native Codex or

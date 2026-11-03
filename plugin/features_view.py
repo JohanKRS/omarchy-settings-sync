@@ -1,0 +1,1163 @@
+"""The Settings tab: one switch per catalog feature, staged until Apply."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+import platform
+import subprocess
+import time
+from pathlib import Path
+
+from gi.repository import Gdk, GLib, Gtk, Pango
+
+from applier import Applier, Ledger, delegation, orphans, status
+import checkout
+from context import repository_state
+from core import private_write, read_json
+import release
+from features import (GROUPS, Probe, dependents, desired, has_catalog, install_id, list_machines, load_catalog,
+                      load_machine, machine_name, machine_path, machine_text, off_mode, ordered, part_enabled,
+                      remove_machine, rename_machine, valid_machine)
+from i18n import tr
+
+FILTERS = ("all", "on", "off", "new", "pending", "modified", "release", "unavailable")
+FILTER_LABELS = {"all": "All", "on": "On", "off": "Off", "new": "New", "pending": "Pending", "release": "Changed by Omarchy",
+                 "modified": "Edited locally", "unavailable": "Not applicable"}
+STATUS_LABELS = {"applied": "Applied", "pending": "Pending", "modified": "Edited locally", "off": "Off",
+                 "new": "New", "unavailable": "Not applicable"}
+GROUP_LABELS = {"desktop": "Desktop", "apps": "Apps", "system": "System", "programs": "Programs"}
+AREA_LABELS = {"hyprland": "Hyprland", "firefox": "Firefox", "shell": "Shell", "voxtype": "Voxtype", "mime": "MIME",
+               "gtk": "GTK", "nautilus": "Nautilus", "steam": "Steam", "whatsapp": "WhatsApp", "papers": "Papers",
+               "tensaku": "Tensaku", "keystroke": "Keystroke", "claude": "Claude", "sddm": "SDDM"}
+RELEASE_LABELS = {"broken": "Error after Omarchy {version}", "default-changed": "Omarchy {version} changed this default",
+                  "changed": "Omarchy {version} changed related files", "redundant": "Omarchy {version} now does this by default"}
+RELEASE_HELP = {
+    "broken": "Hyprland reports configuration errors since the update. Adjust it with the agent.",
+    "default-changed": "Omarchy changed the default value of something this customization sets. Yours still wins.",
+    "changed": "Omarchy changed files near what this customization edits. Check that it still behaves as you expect.",
+    "redundant": "Omarchy's new default matches this customization, so you could turn it off.",
+}
+APP_ICONS = {"nautilus": "org.gnome.Nautilus", "papers": "org.gnome.Papers", "hyprland": "preferences-desktop-display-symbolic",
+             "shell": "preferences-desktop-symbolic", "system": "preferences-system-symbolic",
+             "programs": "package-x-generic-symbolic"}
+
+
+def icon_name(*candidates):
+    """The first icon the active icon theme has, or None."""
+    display = Gdk.Display.get_default()
+    theme = Gtk.IconTheme.get_for_display(display) if display else None
+    return next((name for name in candidates if name and theme and theme.has_icon(name)), None)
+
+
+def group_key(feature):
+    return "programs" if feature.program else (feature.app or feature.group)
+
+
+def group_title(key):
+    if key in GROUP_LABELS:
+        return tr(GROUP_LABELS[key])
+    return AREA_LABELS.get(key, key.replace("-", " ").title())
+
+
+@dataclass
+class Snapshot:
+    checkout: Path = None
+    sha: str = ""
+    problem: str = None
+    features: list = field(default_factory=list)
+    errors: list = field(default_factory=list)
+    machine_name: str = ""
+    machine: dict = field(default_factory=dict)
+    ledger: Ledger = None
+    states: dict = field(default_factory=dict)
+    labels: dict = field(default_factory=dict)
+    failing: dict = field(default_factory=dict)
+    machines: list = field(default_factory=list)
+    binding_needed: bool = False
+    orphans: list = field(default_factory=list)
+    release: dict = field(default_factory=dict)
+
+    def impact(self, feature_id):
+        """What the latest Omarchy update changed for a feature, unless already reviewed."""
+        if feature_id in self.release.get("dismissed", []):
+            return None
+        return self.release.get("impacts", {}).get(feature_id)
+
+    @property
+    def catalog(self):
+        return has_catalog(self.checkout)
+
+
+def state_dir(window):
+    return repository_state(window.locations, window.settings["repository"])
+
+
+def local_catalog(window):
+    return state_dir(window) / "features.local.toml"
+
+
+def results_path(window):
+    return state_dir(window) / "agent-results.json"
+
+
+def make_applier(window, path, ledger):
+    return Applier(path, ledger, window.locations["state"] / "backups", script_dir=state_dir(window))
+
+
+def collect(window, *, fetch=False):
+    """Read everything the tab shows. Runs in a worker thread."""
+    snapshot = Snapshot(machine_name=machine_name(window.settings))
+    repository = window.settings.get("repository")
+    if not repository:
+        snapshot.problem = tr('Choose a configuration repository in Settings.')
+        return snapshot
+    path = checkout.location(window.locations["workspace"], repository)
+    if fetch or not (path / ".git").exists():
+        path, snapshot.sha, snapshot.problem = checkout.update(
+            window.locations["workspace"], repository, window.settings.get("branch", ""))
+    else:
+        snapshot.sha = checkout.head(path)
+    snapshot.checkout = path
+    snapshot.features, snapshot.errors = load_catalog(path, local_catalog(window))
+    snapshot.machine = load_machine(path, snapshot.machine_name)
+    snapshot.machines = list_machines(path)
+    if "machine" not in window.settings and snapshot.machines:
+        # After a reinstall, ask which machine this is instead of guessing.
+        known = {info["name"]: info for info in snapshot.machines}
+        mine = known.get(snapshot.machine_name)
+        snapshot.binding_needed = not mine or bool(mine["install"] and mine["install"] != install_id())
+    snapshot.ledger = Ledger(state_dir(window) / "applied.json")
+    applier = make_applier(window, path, snapshot.ledger)
+    if results_path(window).exists():
+        applier.merge_agent_results(results_path(window), snapshot.features)
+    snapshot.orphans = orphans(snapshot.ledger, snapshot.features)
+    probe = Probe()
+    for feature in snapshot.features:
+        failing = probe.applicable(feature)
+        if failing:
+            snapshot.failing[feature.id] = failing
+        choice = desired(feature, snapshot.machine)
+        states = applier.inspect(feature) if choice == "on" and not failing else {}
+        snapshot.states[feature.id] = states
+        snapshot.labels[feature.id] = status(feature, choice, off_mode(feature, snapshot.machine),
+                                             snapshot.ledger, states, failing)
+    snapshot.release = release_review(window, snapshot, probe.omarchy())
+    return snapshot
+
+
+def defaults_snapshot(window, version):
+    return state_dir(window) / "omarchy-defaults" / version
+
+
+def release_review(window, snapshot, version):
+    """Compare the Omarchy defaults customizations depend on with the version last reviewed here."""
+    if not version or not snapshot.features:
+        return {}
+    ledger = snapshot.ledger
+    seen = ledger.data.get("omarchy", {}).get("version")
+    if not seen:
+        mark_reviewed(window, snapshot, version)
+        return {}
+    if seen == version:
+        return {}
+    path = state_dir(window) / "release-review.json"
+    cached = read_json(path, {})
+    if (cached.get("from"), cached.get("to")) != (seen, version):
+        previous = release.Package(seen, snapshot=defaults_snapshot(window, seen))
+        errors = ""
+        try:
+            result = subprocess.run(["hyprctl", "configerrors"], capture_output=True, text=True, timeout=10)
+            errors = result.stdout.strip() if result.returncode == 0 else ""
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        impacts = release.review(snapshot.features, previous, config_errors=errors) if previous.available else {}
+        cached = {"from": seen, "to": version, "impacts": impacts, "dismissed": [],
+                  "unavailable": not previous.available}
+        private_write(path, cached)
+    if not cached["impacts"]:
+        mark_reviewed(window, snapshot, version)
+        return {}
+    return cached
+
+
+def mark_reviewed(window, snapshot, version):
+    """Remember this version and its relevant defaults for the next update."""
+    snapshot.ledger.data["omarchy"] = {"version": version, "reviewed": GLib.DateTime.new_now_utc().format_iso8601()}
+    snapshot.ledger.save()
+    release.save_snapshot(snapshot.features, defaults_snapshot(window, version))
+    (state_dir(window) / "release-review.json").unlink(missing_ok=True)
+    snapshot.release = {}
+
+
+def changes_for_sync(snapshot):
+    """Features a Sync should process on this machine: (feature, action, mode)."""
+    # Customizations removed from the repository are undone where they were applied.
+    result = [(feature, "off", "default") for feature in snapshot.orphans]
+    for feature in ordered(snapshot.features):
+        if feature.id in snapshot.failing:
+            continue
+        choice = desired(feature, snapshot.machine)
+        mode = off_mode(feature, snapshot.machine)
+        if choice == "on":
+            result.append((feature, "on", mode))
+        elif choice == "off" and snapshot.ledger.applied(feature.id) and mode != "keep":
+            result.append((feature, "off", mode))
+    return result
+
+
+def run_changes(window, snapshot, changes):
+    """Apply (feature, action, mode) triples; returns outcomes. Runs in a worker thread."""
+    applier = make_applier(window, snapshot.checkout, snapshot.ledger)
+    outcomes = []
+    offs = [change for change in changes if change[1] == "off"]
+    ons = [change for change in changes if change[1] == "on"]
+    for feature, _, mode in reversed(offs):
+        outcomes.append(applier.disable(feature, mode))
+    for feature, _, _ in ons:
+        outcomes.append(applier.enable(feature, snapshot.machine))
+    applier.finish(outcomes)
+    snapshot.ledger.data["sha"] = snapshot.sha
+    snapshot.ledger.save()
+    return outcomes
+
+
+def save_machine(window, snapshot, publish):
+    """Write this machine's choices; publish them when publishing is enabled."""
+    path = machine_path(snapshot.checkout, snapshot.machine_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    version = Probe().omarchy()
+    path.write_text(machine_text(snapshot.machine_name, snapshot.machine, hostname=platform.node(),
+                                 omarchy=version, updated=GLib.DateTime.new_now_utc().format_iso8601(),
+                                 install=install_id()))
+    if not publish:
+        return None
+    return checkout.publish(snapshot.checkout, window.settings.get("branch", ""), [path],
+                            f"Update settings for {snapshot.machine_name}")
+
+
+class FeaturesPage(Gtk.Box):
+    def __init__(self, window):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.window = window
+        self.snapshot = None
+        self.staged = {}
+        self.expanded = set()
+        self.loading = False
+        for side in ("top", "bottom", "start", "end"):
+            getattr(self, "set_margin_" + side)(14)
+        # The list and the machines screen share the tab, one level deep.
+        self.views = Gtk.Stack(vexpand=True, hhomogeneous=False, vhomogeneous=False)
+        main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        tools = Gtk.Box(spacing=8)
+        self.search = Gtk.SearchEntry(placeholder_text=tr('Search customizations'), hexpand=True)
+        self.search.connect("search-changed", lambda *_: self.render())
+        tools.append(self.search)
+        self.filter = Gtk.DropDown.new_from_strings([tr(FILTER_LABELS[key]) for key in FILTERS])
+        self.filter.connect("notify::selected", lambda *_: self.render())
+        tools.append(self.filter)
+        machine = Gtk.Box(spacing=6)
+        machine.append(Gtk.Image.new_from_icon_name("computer-symbolic"))
+        self.machine_label = Gtk.Label(ellipsize=Pango.EllipsizeMode.END, max_width_chars=12)
+        machine.append(self.machine_label)
+        self.machines_button = Gtk.Button(child=machine, tooltip_text=tr('Manage machines'))
+        self.machines_button.add_css_class("machine-button")
+        self.machines_button.update_property([Gtk.AccessibleProperty.LABEL], [tr('Manage machines')])
+        self.machines_button.connect("clicked", lambda *_: self.show_machines())
+        tools.append(self.machines_button)
+        main.append(tools)
+        self.banner = Gtk.Box(spacing=8, visible=False)
+        self.banner.add_css_class("features-banner")
+        self.banner_text = Gtk.Label(xalign=0, wrap=True, hexpand=True)
+        self.banner_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.banner.append(self.banner_text)
+        self.banner_button = Gtk.Button(valign=Gtk.Align.CENTER)
+        self.banner_button.add_css_class("flat")
+        self.banner_button.add_css_class("link-action")
+        self.banner_button.connect("clicked", lambda *_: self.banner_action())
+        self.banner.append(self.banner_button)
+        main.append(self.banner)
+        self.undecided = Gtk.Box(spacing=4, visible=False)
+        self.undecided.add_css_class("features-notice")
+        self.undecided_text = Gtk.Label(xalign=0, hexpand=True, wrap=True)
+        self.undecided_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.undecided_text.set_tooltip_text(tr('Nothing is installed until you turn customizations on and apply.'))
+        self.undecided.append(self.undecided_text)
+        turn_on = Gtk.Button(label=tr('Turn all on'), valign=Gtk.Align.CENTER)
+        turn_on.add_css_class("flat")
+        turn_on.add_css_class("link-action")
+        turn_on.connect("clicked", lambda *_: self.decide_new("on"))
+        self.undecided.append(turn_on)
+        main.append(self.undecided)
+        self.release_notice = Gtk.Box(spacing=4, visible=False)
+        self.release_notice.add_css_class("features-notice")
+        self.release_notice.add_css_class("release-notice")
+        self.release_text = Gtk.Label(xalign=0, hexpand=True, wrap=True)
+        self.release_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.release_notice.append(self.release_text)
+        show = Gtk.Button(label=tr('Show'), valign=Gtk.Align.CENTER)
+        show.add_css_class("flat")
+        show.add_css_class("link-action")
+        show.connect("clicked", lambda *_: self.filter.set_selected(FILTERS.index("release")))
+        self.release_notice.append(show)
+        reviewed = Gtk.Button(label=tr('Mark as reviewed'), valign=Gtk.Align.CENTER)
+        reviewed.add_css_class("flat")
+        reviewed.add_css_class("link-action")
+        reviewed.connect("clicked", lambda *_: self.release_reviewed())
+        self.release_notice.append(reviewed)
+        main.append(self.release_notice)
+        self.listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.listing.set_margin_end(10)  # Keep text clear of the overlay scrollbar.
+        scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroll.set_child(self.listing)
+        main.append(scroll)
+        # The tab's action bar: Sync when nothing is staged, Apply when it is.
+        self.bar = Gtk.Box(spacing=8, visible=False)
+        self.bar.add_css_class("pending-bar")
+        self.bar_text = Gtk.Label(xalign=0, wrap=True, hexpand=True)
+        self.bar_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.bar.append(self.bar_text)
+        sync = Gtk.Box(spacing=6)
+        sync.append(Gtk.Image.new_from_icon_name("view-refresh-symbolic"))
+        sync.append(Gtk.Label(label=tr('Sync')))
+        self.sync_button = Gtk.Button(child=sync, valign=Gtk.Align.CENTER, tooltip_text=tr(
+            'Apply repository updates to the customizations that are on for this machine'))
+        self.sync_button.connect("clicked", lambda *_: self.window.sync())
+        self.bar.append(self.sync_button)
+        discard = Gtk.Button(label=tr('Discard'), valign=Gtk.Align.CENTER)
+        discard.add_css_class("flat")
+        discard.connect("clicked", lambda *_: self.discard())
+        self.discard_button = discard
+        self.bar.append(discard)
+        self.apply_button = Gtk.Button(label=tr('Apply'), valign=Gtk.Align.CENTER)
+        self.apply_button.add_css_class("suggested-action")
+        self.apply_button.connect("clicked", lambda *_: self.apply())
+        self.bar.append(self.apply_button)
+        main.append(self.bar)
+        self.views.add_named(main, "list")
+        machines = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        header = Gtk.Box(spacing=8)
+        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text=tr('Back to customizations'))
+        back.add_css_class("flat")
+        back.update_property([Gtk.AccessibleProperty.LABEL], [tr('Back to customizations')])
+        back.connect("clicked", lambda *_: self.hide_machines())
+        header.append(back)
+        heading = Gtk.Label(label=tr('Machines'), xalign=0)
+        heading.add_css_class("feature-title")
+        header.append(heading)
+        machines.append(header)
+        self.machines_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.machines_content.set_margin_end(10)
+        machines_scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        machines_scroll.set_child(self.machines_content)
+        machines.append(machines_scroll)
+        self.views.add_named(machines, "machines")
+        self.append(self.views)
+        self.banner_mode = None
+        self.controls = []
+        self.removing = None
+        self.fetched = 0
+
+    def sync_sensitivity(self):
+        for widget in self.controls:
+            widget.set_sensitive(not self.window.busy)
+        self.update_bar()
+
+    # Data ------------------------------------------------------------------
+    def refresh(self, fetch=None):
+        """Show the local copy at once, then fetch the repository in the background."""
+        if fetch is None:
+            fetch = not self.window.busy and time.monotonic() - self.fetched > 60
+        if fetch:
+            self.fetched = time.monotonic()
+        if self.loading or not self.window.settings.get("repository"):
+            if not self.window.settings.get("repository"):
+                self.show_banner(tr('Choose a configuration repository in Settings.'), None)
+            return
+        self.loading = True
+        def loaded(snapshot):
+            self.snapshot = snapshot
+            self.render()
+            if fetch and snapshot.checkout and (snapshot.checkout / ".git").exists():
+                self.bar_text.set_text(tr('Checking the repository…'))
+                self.window.worker(lambda: self.fetch_remote(snapshot), fetched, failed)
+            else:
+                self.loading = False
+                self.update_bar()
+        def fetched(result):
+            changed, problem = result
+            if changed:
+                self.window.worker(lambda: collect(self.window), loaded_after_fetch, failed)
+                return
+            self.loading = False
+            if problem:
+                self.snapshot.problem = problem
+                self.render()
+            self.update_bar()
+        def loaded_after_fetch(snapshot):
+            self.loading = False
+            self.snapshot = snapshot
+            self.render()
+        def failed(message):
+            self.loading = False
+            self.show_banner(message, None)
+            self.update_bar()
+        self.window.worker(lambda: collect(self.window), loaded, failed)
+
+    def fetch_remote(self, snapshot):
+        """Fast-forward the working copy. Returns (list changed, problem)."""
+        repository = self.window.settings["repository"]
+        _, sha, problem = checkout.update(self.window.locations["workspace"], repository,
+                                          self.window.settings.get("branch", ""))
+        return sha != snapshot.sha and not problem, problem
+
+    def show_banner(self, text, mode, button=None):
+        self.banner_mode = mode
+        self.banner_text.set_text(text)
+        self.banner_button.set_visible(bool(mode))
+        if button:
+            self.banner_button.set_label(button)
+        self.banner.set_visible(bool(text))
+
+    def banner_action(self):
+        if self.banner_mode == "migrate":
+            self.window.migrate_catalog()
+        elif self.banner_mode == "fix":
+            self.window.ask_agent_about_catalog(self.snapshot.errors)
+        elif self.banner_mode == "machines":
+            self.show_machines()
+
+    # Rendering ---------------------------------------------------------------
+    def effective(self, feature):
+        staged = self.staged.get(feature.id, {})
+        return staged.get("state") or desired(feature, self.snapshot.machine)
+
+    def render(self):
+        while self.listing.get_first_child():
+            self.listing.remove(self.listing.get_first_child())
+        self.controls = []
+        snapshot = self.snapshot
+        if not snapshot:
+            return
+        machine = snapshot.machine_name
+        self.machine_label.set_text("—" if snapshot.binding_needed else machine)
+        self.machines_button.set_sensitive(bool(snapshot.checkout))
+        if snapshot.binding_needed:
+            self.show_banner(tr('This installation is not linked to a machine yet. Choose one to reuse its choices, or create a new one.'),
+                             "machines", tr('Choose machine'))
+        elif snapshot.problem and not snapshot.catalog:
+            self.show_banner(tr('The repository could not be updated: {problem}', problem=snapshot.problem), None)
+        elif not snapshot.catalog and not snapshot.features:
+            self.show_banner(tr('This repository has no customizations catalog yet. The agent can create one from your current settings.'),
+                             "migrate", tr('Create catalog'))
+        elif snapshot.errors:
+            self.show_banner(tr('The catalog has {count} problems.', count=len(snapshot.errors)), "fix", tr('Fix with the agent'))
+        elif snapshot.problem:
+            self.show_banner(tr('Showing the local copy. {problem}', problem=snapshot.problem), None)
+        else:
+            self.show_banner("", None)
+        # Only a brand-new machine needs the explanation; afterwards the New pill and filter suffice.
+        applicable = [f for f in snapshot.features if snapshot.labels.get(f.id) != "unavailable"]
+        fresh = bool(applicable) and all(snapshot.labels.get(f.id) == "new" for f in applicable)
+        self.undecided.set_visible(fresh and not self.staged and not snapshot.binding_needed)
+        self.undecided_text.set_text(tr('New machine: choose what to install'))
+        affected = [f for f in snapshot.features if snapshot.impact(f.id)]
+        self.release_notice.set_visible(bool(affected))
+        if affected:
+            self.release_text.set_text(tr('Omarchy {old} → {new}: {count} affected', old=snapshot.release["from"],
+                                          new=snapshot.release["to"], count=len(affected)))
+        query = self.search.get_text().casefold().strip()
+        wanted = FILTERS[self.filter.get_selected()] if self.filter.get_selected() < len(FILTERS) else "all"
+        groups = {}
+        for feature in snapshot.features:
+            label = snapshot.labels.get(feature.id, "off")
+            packages = [name for part in feature.parts for name in part.data.get("install", []) + part.data.get("remove", [])]
+            text = " ".join([feature.title, feature.summary, feature.id, feature.app, *feature.areas, *packages]).casefold()
+            if query and query not in text:
+                continue
+            on = self.effective(feature) == "on"
+            if wanted == "on" and not on or wanted == "off" and on:
+                continue
+            if wanted == "release" and not snapshot.impact(feature.id):
+                continue
+            if wanted not in ("all", "on", "off", "release") and label != wanted:
+                continue
+            groups.setdefault(group_key(feature), []).append(feature)
+        # Programs first, then one group per app, and system-wide settings last.
+        middle = sorted((key for key in groups if key not in ("programs", "system")), key=lambda k: group_title(k).casefold())
+        for group in [key for key in ("programs",) if key in groups] + middle + [key for key in ("system",) if key in groups]:
+            features = groups[group]
+            heading = Gtk.Box(spacing=8)
+            heading.add_css_class("feature-group-row")
+            icon = (icon_name(APP_ICONS["programs"]) if group == "programs" else
+                    icon_name(*(f.icon for f in features), APP_ICONS.get(group), group))
+            if icon:
+                image = Gtk.Image.new_from_icon_name(icon)
+                image.add_css_class("feature-group-icon")
+                heading.append(image)
+            name = Gtk.Label(label=group_title(group).upper(), xalign=0)
+            name.add_css_class("feature-group")
+            heading.append(name)
+            count = Gtk.Label(label=str(len(features)), xalign=0)
+            count.add_css_class("feature-count")
+            heading.append(count)
+            self.listing.append(heading)
+            for feature in features:
+                self.listing.append(self.program_row(feature) if feature.program else self.row(feature))
+        if not groups and snapshot.features:
+            empty = Gtk.Label(label=tr('No customizations match.'), xalign=0)
+            empty.add_css_class("muted")
+            self.listing.append(empty)
+        self.update_bar()
+
+    def row(self, feature):
+        snapshot = self.snapshot
+        label = snapshot.labels.get(feature.id, "off")
+        open_ = feature.id in self.expanded
+        frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        frame.add_css_class("feature-row")
+        if open_:
+            frame.add_css_class("expanded")
+        if label == "unavailable":
+            frame.add_css_class("unavailable")
+        head = Gtk.Box(spacing=10)
+        chevron = Gtk.Image.new_from_icon_name("pan-down-symbolic" if open_ else "pan-end-symbolic")
+        chevron.add_css_class("feature-chevron")
+        chevron.set_valign(Gtk.Align.START)
+        head.append(chevron)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        title = Gtk.Label(label=feature.title, xalign=0, wrap=True)
+        title.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        title.add_css_class("feature-title")
+        texts.append(title)
+        # The group already names the app; list only the other areas it touches.
+        details = [AREA_LABELS.get(area, area.capitalize()) for area in feature.areas if area != group_key(feature)]
+        if feature.needs_agent:
+            details.append(tr('uses the agent'))
+        if feature.needs_admin:
+            details.append(tr('asks for password'))
+        if feature.local:
+            details.append(tr('this machine only'))
+        if label == "unavailable":
+            details = [tr('Not applicable here: {condition}', condition=snapshot.failing[feature.id])]
+        impact = snapshot.impact(feature.id)
+        if impact:
+            frame.add_css_class("release-affected")
+            changed = Gtk.Label(label=tr(RELEASE_LABELS[impact["kind"]], version=snapshot.release["to"]), xalign=0, wrap=True)
+            changed.add_css_class("release-label")
+            texts.append(changed)
+        if details:
+            subtitle = Gtk.Label(label=" · ".join(details), xalign=0, wrap=True)
+            subtitle.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            subtitle.add_css_class("feature-subtitle")
+            texts.append(subtitle)
+        head.append(texts)
+        head.append(self.status_widget("staged" if feature.id in self.staged else label))
+        switch = Gtk.Switch(valign=Gtk.Align.CENTER, active=self.effective(feature) == "on")
+        switch.set_sensitive(label != "unavailable" and not self.window.busy)
+        if label != "unavailable":
+            self.controls.append(switch)
+        switch.update_property([Gtk.AccessibleProperty.LABEL], [feature.title])
+        switch.connect("notify::active", lambda widget, _: self.toggled(feature, widget.get_active()))
+        head.append(switch)
+        frame.append(head)
+        click = Gtk.GestureClick()
+        click.connect("released", lambda *_: self.toggle_details(feature))
+        texts.add_controller(click)
+        chevron_click = Gtk.GestureClick()
+        chevron_click.connect("released", lambda *_: self.toggle_details(feature))
+        chevron.add_controller(chevron_click)
+        if open_:
+            frame.append(self.details(feature))
+        return frame
+
+    def program_row(self, feature):
+        """A program is one switch: install or remove it on this machine, nothing else."""
+        label = self.snapshot.labels.get(feature.id, "off")
+        frame = Gtk.Box(spacing=10)
+        frame.add_css_class("feature-row")
+        frame.add_css_class("program-row")
+        if label == "unavailable":
+            frame.add_css_class("unavailable")
+        image = Gtk.Image.new_from_icon_name(icon_name(feature.icon, "package-x-generic-symbolic") or "package-x-generic-symbolic")
+        image.set_pixel_size(20)
+        image.add_css_class("program-icon")
+        frame.append(image)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        title = Gtk.Label(label=feature.title, xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        title.add_css_class("feature-title")
+        texts.append(title)
+        package = next(iter(feature.parts[0].data.get("install", []) + feature.parts[0].data.get("remove", [])),
+                       feature.id.removeprefix("program-"))
+        action = tr('Install') if feature.program == "install" else tr('Uninstall')
+        detail = [action, package] + (["AUR"] if feature.parts[0].agent else [])
+        if label == "unavailable":
+            detail = [tr('Not applicable here: {condition}', condition=self.snapshot.failing[feature.id])]
+        subtitle = Gtk.Label(label=" · ".join(detail), xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        subtitle.add_css_class("feature-subtitle")
+        subtitle.add_css_class("program-" + feature.program)
+        texts.append(subtitle)
+        frame.append(texts)
+        frame.append(self.status_widget("staged" if feature.id in self.staged else label))
+        switch = Gtk.Switch(valign=Gtk.Align.CENTER, active=self.effective(feature) == "on")
+        switch.set_sensitive(label != "unavailable" and not self.window.busy)
+        if label != "unavailable":
+            self.controls.append(switch)
+        switch.update_property([Gtk.AccessibleProperty.LABEL], [f"{action} {feature.title}"])
+        switch.connect("notify::active", lambda widget, _: self.toggled(feature, widget.get_active()))
+        frame.append(switch)
+        return frame
+
+    def release_details(self, feature, impact):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        title = Gtk.Label(label=tr('Changed in Omarchy {version}', version=self.snapshot.release["to"]).upper(), xalign=0)
+        title.add_css_class("feature-section")
+        title.add_css_class("release-label")
+        box.append(title)
+        explain = Gtk.Label(label=tr(RELEASE_HELP[impact["kind"]]), xalign=0, wrap=True)
+        explain.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        explain.add_css_class("feature-subtitle")
+        box.append(explain)
+        for key in impact.get("keys", []):
+            shown = {name: "—" if key[name] is None else key[name] for name in ("before", "after", "mine")}
+            line = Gtk.Label(label=tr('{key}: default {before} → {after} · yours {mine}', key=key["key"], **shown),
+                             xalign=0, wrap=True)
+            line.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            box.append(line)
+        if impact.get("diff"):
+            lines = impact["diff"].splitlines()
+            diff = Gtk.Label(label="\n".join(lines[:14]) + ("\n…" if len(lines) > 14 else ""), xalign=0,
+                             selectable=True, wrap=True)
+            diff.set_wrap_mode(Pango.WrapMode.CHAR)
+            diff.add_css_class("release-diff")
+            diff.set_tooltip_text(", ".join(impact["files"]))
+            box.append(diff)
+        actions = Gtk.Box(spacing=4)
+        keep = Gtk.Button(label=tr('Keep mine'))
+        keep.connect("clicked", lambda *_: self.dismiss_impact(feature))
+        actions.append(keep)
+        if impact["kind"] in ("redundant", "default-changed") and self.effective(feature) == "on":
+            adopt = Gtk.Button(label=tr('Use the new default'))
+            adopt.connect("clicked", lambda *_: self.adopt_default(feature))
+            actions.append(adopt)
+        adjust = Gtk.Button(label=tr('Adjust with the agent'))
+        adjust.connect("clicked", lambda *_: self.window.adjust_after_release(self.snapshot, feature, impact))
+        actions.append(adjust)
+        for button in _walk(actions):
+            if isinstance(button, Gtk.Button):
+                button.add_css_class("flat")
+                button.add_css_class("link-action")
+                button.set_sensitive(not self.window.busy)
+                self.controls.append(button)
+        box.append(actions)
+        return box
+
+    def save_review(self):
+        private_write(state_dir(self.window) / "release-review.json", self.snapshot.release)
+
+    def dismiss_impact(self, feature):
+        release_state = self.snapshot.release
+        release_state.setdefault("dismissed", []).append(feature.id)
+        if not any(self.snapshot.impact(f.id) for f in self.snapshot.features):
+            self.release_reviewed()
+            return
+        self.save_review()
+        self.render()
+
+    def adopt_default(self, feature):
+        """Turn the customization off with 'return to the Omarchy default', staged like any other change."""
+        self.stage(feature, state="off", mode="default")
+        self.dismiss_impact(feature)
+
+    def release_reviewed(self):
+        version = self.snapshot.release.get("to")
+        if version:
+            mark_reviewed(self.window, self.snapshot, version)
+        if FILTERS[self.filter.get_selected()] == "release":
+            self.filter.set_selected(0)
+        self.render()
+
+    def status_widget(self, label):
+        text = tr('Changed') if label == "staged" else tr(STATUS_LABELS[label])
+        if label == "new":
+            pill = Gtk.Label(label=text, valign=Gtk.Align.CENTER)
+            pill.add_css_class("feature-pill")
+            return pill
+        status = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
+        dot = Gtk.Label(label="●")
+        dot.add_css_class("status-dot")
+        dot.add_css_class("status-" + label)
+        status.append(dot)
+        words = Gtk.Label(label=text)
+        words.add_css_class("feature-status")
+        status.append(words)
+        return status
+
+    def details(self, feature):
+        snapshot = self.snapshot
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        content.add_css_class("feature-details")
+        if feature.summary:
+            summary = Gtk.Label(label=feature.summary, xalign=0, wrap=True)
+            summary.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            summary.add_css_class("feature-subtitle")
+            content.append(summary)
+        impact = snapshot.impact(feature.id)
+        if impact:
+            content.append(self.release_details(feature, impact))
+        parts = Gtk.Label(label=tr('Parts'), xalign=0)
+        parts.add_css_class("feature-section")
+        content.append(parts)
+        states = snapshot.states.get(feature.id, {})
+        staged_parts = self.staged.get(feature.id, {}).get("parts", {})
+        for part in feature.parts:
+            line = Gtk.Box(spacing=8)
+            name = Gtk.Label(label=part.title, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE)
+            name.set_tooltip_text(part.data.get("dest") or part.title)
+            line.append(name)
+            who = tr('agent') if part.agent else tr('asks for password') if part.admin else tr('plugin')
+            state = states.get(part.key)
+            if state in ("modified", "missing", "outdated"):
+                who = tr(STATUS_LABELS["modified" if state == "modified" else "pending"]) + " · " + who
+            hint = Gtk.Label(label=who)
+            hint.add_css_class("feature-subtitle")
+            line.append(hint)
+            if part.optional:
+                key = f"{feature.id}.{part.data['id']}"
+                active = staged_parts.get(key, "on" if part_enabled(feature, part, snapshot.machine) else "off") == "on"
+                toggle = Gtk.Switch(active=active, valign=Gtk.Align.CENTER)
+                toggle.set_sensitive(not self.window.busy)
+                self.controls.append(toggle)
+                toggle.connect("notify::active", lambda widget, _, k=key: self.part_toggled(feature, k, widget.get_active()))
+                line.append(toggle)
+            content.append(line)
+        off = Gtk.Label(label=tr('When turned off on this machine'), xalign=0)
+        off.add_css_class("feature-section")
+        content.append(off)
+        current = self.staged.get(feature.id, {}).get("mode", off_mode(feature, snapshot.machine))
+        group = None
+        for mode, text in (("default", tr('Remove and return to the Omarchy default')),
+                           ("keep", tr('Stop syncing and keep it as it is')),
+                           ("previous", tr('Restore how it was before (backup)'))):
+            option = Gtk.CheckButton(label=text, active=current == mode)
+            if group:
+                option.set_group(group)
+            group = group or option
+            option.set_sensitive(not self.window.busy)
+            self.controls.append(option)
+            option.connect("toggled", lambda widget, m=mode: widget.get_active() and self.mode_changed(feature, m))
+            content.append(option)
+        actions = Gtk.Box(spacing=4)
+        actions.add_css_class("feature-actions")
+        talk = Gtk.Button(label=tr('Ask the agent'))
+        talk.add_css_class("flat")
+        talk.add_css_class("link-action")
+        talk.set_tooltip_text(tr('Talk about this customization'))
+        talk.connect("clicked", lambda *_: self.window.discuss_feature(feature))
+        actions.append(talk)
+        if self.removing != feature.id:
+            remove = Gtk.Button(label=tr('Remove from repository'))
+            remove.add_css_class("flat")
+            remove.add_css_class("destructive")
+            remove.set_sensitive(not self.window.busy)
+            self.controls.append(remove)
+            remove.connect("clicked", lambda *_: self.ask_removal(feature))
+            actions.append(remove)
+        content.append(actions)
+        if self.removing == feature.id:
+            others = [f.title for f in dependents(snapshot.features, feature.id)]
+            text = tr('Remove “{title}” from every machine? It is undone here now, deleted from the repository, and other machines undo it on their next Sync.',
+                      title=feature.title)
+            if others:
+                text += " " + tr('Also used by: {names}.', names=", ".join(others))
+            question = Gtk.Label(label=text, xalign=0, wrap=True)
+            question.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            content.append(question)
+            confirm = Gtk.Box(spacing=6)
+            yes = Gtk.Button(label=tr('Remove everywhere'))
+            yes.add_css_class("destructive")
+            yes.set_sensitive(not self.window.busy)
+            self.controls.append(yes)
+            yes.connect("clicked", lambda *_: self.remove(feature))
+            confirm.append(yes)
+            cancel = Gtk.Button(label=tr('Cancel'))
+            cancel.add_css_class("flat")
+            cancel.connect("clicked", lambda *_: self.ask_removal(None))
+            confirm.append(cancel)
+            content.append(confirm)
+        return content
+
+    # Staging ---------------------------------------------------------------
+    def ask_removal(self, feature):
+        self.removing = feature.id if feature else None
+        GLib.idle_add(self.render)
+
+    def remove(self, feature):
+        self.removing = None
+        self.staged.pop(feature.id, None)
+        self.window.remove_feature(self.snapshot, feature)
+
+    def toggle_details(self, feature):
+        self.expanded.symmetric_difference_update({feature.id})
+        self.render()
+
+    def stage(self, feature, **values):
+        entry = self.staged.setdefault(feature.id, {})
+        entry.update(values)
+        base = desired(feature, self.snapshot.machine)
+        if entry.get("state") == base:
+            entry.pop("state")
+        if entry.get("mode") == off_mode(feature, self.snapshot.machine):
+            entry.pop("mode")
+        if not entry.get("parts"):
+            entry.pop("parts", None)
+        if not entry:
+            self.staged.pop(feature.id)
+
+    def toggled(self, feature, active):
+        if (self.effective(feature) == "on") == active:
+            return
+        by_id = {f.id: f for f in self.snapshot.features}
+        self.stage(feature, state="on" if active else "off")
+        if active:
+            for required in ordered(self.snapshot.features, feature.requires):
+                if required.id != feature.id and self.effective(required) != "on":
+                    self.stage(required, state="on")
+        else:
+            for dependent in dependents(self.snapshot.features, feature.id):
+                if self.effective(dependent) == "on":
+                    self.stage(by_id[dependent.id], state="off")
+            if self.snapshot.ledger.applied(feature.id):
+                self.expanded.add(feature.id)
+        GLib.idle_add(self.render)
+
+    def decide_new(self, state):
+        for feature in self.snapshot.features:
+            if self.snapshot.labels.get(feature.id) == "new" and feature.id not in self.staged:
+                self.stage(feature, state=state)
+        self.render()
+
+    def part_toggled(self, feature, key, active):
+        parts = dict(self.staged.get(feature.id, {}).get("parts", {}))
+        saved = self.snapshot.machine.get("parts", {}).get(key, "on")
+        value = "on" if active else "off"
+        if value == saved:
+            parts.pop(key, None)
+        else:
+            parts[key] = value
+        self.stage(feature, parts=parts)
+        self.update_bar()
+
+    def mode_changed(self, feature, mode):
+        self.stage(feature, mode=mode)
+        self.update_bar()
+
+    def discard(self):
+        self.staged.clear()
+        self.render()
+
+    def update_bar(self):
+        snapshot = self.snapshot
+        idle = self.window.sync_available() and not self.loading
+        self.sync_button.set_sensitive(idle)
+        self.apply_button.set_sensitive(idle)
+        if not snapshot:
+            self.bar.set_visible(False)
+            return
+        staged = bool(self.staged)
+        self.sync_button.set_visible(not staged)
+        self.discard_button.set_visible(staged)
+        self.apply_button.set_visible(staged)
+        self.bar.set_visible(True)
+        if staged:
+            self.bar_text.remove_css_class("feature-subtitle")
+        else:
+            self.bar_text.add_css_class("feature-subtitle")
+            self.bar_text.set_text(self.sync_summary())
+            waiting = self.updates()
+            if waiting:
+                self.sync_button.add_css_class("suggested-action")
+            else:
+                self.sync_button.remove_css_class("suggested-action")
+            return
+        by_id = {f.id: f for f in snapshot.features}
+        ons = [i for i, e in self.staged.items() if e.get("state") == "on"]
+        offs = [i for i, e in self.staged.items() if e.get("state") == "off"]
+        other = [i for i, e in self.staged.items() if "state" not in e]
+        parts = []
+        if ons:
+            parts.append(tr('{count} to turn on', count=len(ons)))
+        if offs:
+            parts.append(tr('{count} to turn off', count=len(offs)))
+        if other:
+            parts.append(tr('{count} adjusted', count=len(other)))
+        touched = [by_id[i] for i in self.staged if i in by_id]
+        if any(f.needs_admin for f in touched):
+            parts.append(tr('asks for password'))
+        if any(f.needs_agent for f in touched):
+            parts.append(tr('uses the agent'))
+        self.bar_text.set_text(" · ".join(parts))
+
+    def updates(self):
+        snapshot = self.snapshot
+        if not snapshot or not snapshot.catalog:
+            return 0
+        return sum(snapshot.labels.get(f.id) == "pending" for f in snapshot.features) + len(snapshot.orphans)
+
+    def sync_summary(self):
+        snapshot = self.snapshot
+        if not snapshot.catalog:
+            return tr('Without a catalog, Sync asks the agent.')
+        count = self.updates()
+        if count:
+            return tr('{count} updates to apply', count=count)
+        when = snapshot.ledger.data.get("updated") if snapshot.ledger else None
+        try:
+            moment = datetime.fromisoformat(when).astimezone()
+        except (TypeError, ValueError):
+            return tr('Up to date')
+        stamp = moment.strftime('%H:%M') if moment.date() == datetime.now().date() else moment.strftime('%d/%m %H:%M')
+        return tr('Up to date · synced {time}', time=stamp)
+
+    def apply(self):
+        if not self.staged or self.window.busy or not self.snapshot:
+            return
+        if self.snapshot.binding_needed:
+            self.show_machines()
+            return
+        snapshot, staged = self.snapshot, dict(self.staged)
+        machine = snapshot.machine
+        for identifier, entry in staged.items():
+            if "state" in entry:
+                machine.setdefault("features", {})[identifier] = entry["state"]
+            if "mode" in entry:
+                if entry["mode"] == "default":
+                    machine.setdefault("off", {}).pop(identifier, None)
+                else:
+                    machine.setdefault("off", {})[identifier] = entry["mode"]
+            for key, value in entry.get("parts", {}).items():
+                machine.setdefault("parts", {})[key] = value
+        by_id = {feature.id: feature for feature in snapshot.features}
+        changes = []
+        for feature in ordered(snapshot.features, [i for i in staged if i in by_id]):
+            choice = desired(feature, machine)
+            mode = off_mode(feature, machine)
+            if choice == "on":
+                changes.append((feature, "on", mode))
+            elif choice == "off" and snapshot.ledger.applied(feature.id):
+                changes.append((feature, "off", mode))
+        publish = self.window.publish.get_active()
+        self.staged.clear()
+        self.loading = True
+        self.apply_button.set_sensitive(False)
+        self.window.status.set_text(tr('Applying customizations…'))
+        def work():
+            problem = save_machine(self.window, snapshot, publish)
+            return run_changes(self.window, snapshot, changes), problem
+        def done(result):
+            self.loading = False
+            self.window.features_applied(snapshot, *result)
+        def failed(message):
+            self.loading = False
+            self.window.failure(message)
+            self.refresh()
+        self.window.worker(work, done, failed)
+
+    # Machines --------------------------------------------------------------
+    def show_machines(self):
+        if not self.snapshot or not self.snapshot.checkout:
+            return
+        self.render_machines(self.machines_content)
+        self.views.set_visible_child_name("machines")
+
+    def hide_machines(self):
+        self.views.set_visible_child_name("list")
+
+    @property
+    def showing_machines(self):
+        return self.views.get_visible_child_name() == "machines"
+
+    def render_machines(self, content, editing=None, confirming=None, message=""):
+        while content.get_first_child():
+            content.remove(content.get_first_child())
+        snapshot = self.snapshot
+        current = snapshot.machine_name
+        bound = "machine" in self.window.settings and not snapshot.binding_needed
+        intro = Gtk.Label(label=tr('Each installation uses the choices of one machine. After reinstalling, use the same machine to get its choices back, or start it fresh.'),
+                          xalign=0, wrap=True)
+        intro.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        intro.add_css_class("feature-subtitle")
+        content.append(intro)
+        if message:
+            note = Gtk.Label(label=message, xalign=0, wrap=True)
+            note.add_css_class("features-notice")
+            content.append(note)
+        names = [info["name"] for info in snapshot.machines]
+        machines = list(snapshot.machines)
+        if current not in names:
+            machines.insert(0, {"name": current, "hostname": "", "omarchy": "", "updated": "", "install": "",
+                                "on": 0, "off": 0, "unsaved": True})
+        busy = self.window.busy or self.loading
+        for info in machines:
+            name = info["name"]
+            mine = name == current and bound
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            row.add_css_class("feature-row")
+            head = Gtk.Box(spacing=8)
+            head.append(Gtk.Image.new_from_icon_name("computer-symbolic"))
+            title = Gtk.Label(label=name, xalign=0, ellipsize=Pango.EllipsizeMode.END)
+            title.add_css_class("feature-title")
+            head.append(title)
+            if mine:
+                pill = Gtk.Label(label=tr('this installation'), valign=Gtk.Align.CENTER)
+                pill.add_css_class("feature-pill")
+                head.append(pill)
+            spacer = Gtk.Box(hexpand=True)
+            head.append(spacer)
+            if not info.get("unsaved") and editing != name and not confirming:
+                rename = Gtk.Button(icon_name="document-edit-symbolic", tooltip_text=tr('Rename'))
+                rename.add_css_class("flat")
+                rename.update_property([Gtk.AccessibleProperty.LABEL], [tr('Rename')])
+                rename.connect("clicked", lambda *_, n=name: self.render_machines(content, editing=n))
+                head.append(rename)
+                if not mine:
+                    remove = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text=tr('Remove'))
+                    remove.add_css_class("flat")
+                    remove.add_css_class("destructive")
+                    remove.update_property([Gtk.AccessibleProperty.LABEL], [tr('Remove')])
+                    remove.connect("clicked", lambda *_, n=name: self.render_machines(content, confirming=("remove", n)))
+                    head.append(remove)
+            row.append(head)
+            details = []
+            if info.get("unsaved"):
+                details.append(tr('not saved yet'))
+            if info["hostname"]:
+                details.append(info["hostname"])
+            if info["omarchy"]:
+                details.append("Omarchy " + info["omarchy"])
+            if info["updated"]:
+                details.append(tr('updated {date}', date=info["updated"][:10]))
+            if not info.get("unsaved"):
+                details.append(tr('{on} on · {off} off', on=info["on"], off=info["off"]))
+            if info["install"] and info["install"] == install_id() and not mine:
+                details.append(tr('same installation as this one'))
+            line = Gtk.Label(label=" · ".join(details), xalign=0, wrap=True)
+            line.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            line.add_css_class("feature-subtitle")
+            row.append(line)
+            actions = Gtk.Box(spacing=6)
+            if editing == name:
+                entry = Gtk.Entry(text=name, hexpand=True)
+                actions.append(entry)
+                save = Gtk.Button(label=tr('Save'))
+                save.add_css_class("suggested-action")
+                save.connect("clicked", lambda *_, old=name, field=entry: self.machine_action(
+                    content, "rename", old, field.get_text().strip()))
+                entry.connect("activate", lambda field, old=name: self.machine_action(content, "rename", old, field.get_text().strip()))
+                actions.append(save)
+                cancel = Gtk.Button(label=tr('Cancel'))
+                cancel.add_css_class("flat")
+                cancel.connect("clicked", lambda *_: self.render_machines(content))
+                actions.append(cancel)
+            elif confirming and confirming[1] == name:
+                kind = confirming[0]
+                text = (tr('Remove {name} from the repository?', name=name) if kind == "remove" else
+                        tr('Start {name} over as a new machine? Its saved choices are cleared and nothing is applied until you choose.', name=name))
+                question = Gtk.Label(label=text, xalign=0, wrap=True)
+                question.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                row.append(question)
+                confirm = Gtk.Button(label=tr('Remove') if kind == "remove" else tr('Start fresh'))
+                confirm.add_css_class("destructive" if kind == "remove" else "suggested-action")
+                confirm.connect("clicked", lambda *_, n=name, k=kind: self.machine_action(content, k, n))
+                actions.append(confirm)
+                cancel = Gtk.Button(label=tr('Cancel'))
+                cancel.add_css_class("flat")
+                cancel.connect("clicked", lambda *_: self.render_machines(content))
+                actions.append(cancel)
+            else:
+                if not mine:
+                    use = Gtk.Button(label=tr('Use this name') if info.get("unsaved") else tr('Use its choices here'))
+                    use.add_css_class("suggested-action")
+                    use.connect("clicked", lambda *_, n=name: self.machine_action(content, "use", n))
+                    actions.append(use)
+                if not info.get("unsaved"):
+                    fresh = Gtk.Button(label=tr('Start fresh'))
+                    fresh.add_css_class("flat")
+                    fresh.add_css_class("link-action")
+                    fresh.set_tooltip_text(tr('Use this name on this installation, without its earlier choices.'))
+                    fresh.connect("clicked", lambda *_, n=name: self.render_machines(content, confirming=("fresh", n)))
+                    actions.append(fresh)
+            if actions.get_first_child():
+                row.append(actions)
+            for child in _walk(row):
+                if isinstance(child, (Gtk.Button, Gtk.Entry)):
+                    child.set_sensitive(not busy)
+            content.append(row)
+        section = Gtk.Label(label=tr('New machine').upper(), xalign=0, margin_top=14)
+        section.add_css_class("feature-group")
+        content.append(section)
+        create = Gtk.Box(spacing=6)
+        entry = Gtk.Entry(placeholder_text=tr('New machine name'), hexpand=True)
+        create.append(entry)
+        add = Gtk.Button(label=tr('Create and use'))
+        add.connect("clicked", lambda *_: self.machine_action(content, "create", entry.get_text().strip()))
+        entry.connect("activate", lambda *_: self.machine_action(content, "create", entry.get_text().strip()))
+        add.set_sensitive(not busy)
+        create.append(add)
+        content.append(create)
+
+    def machine_action(self, content, action, name, new=None):
+        snapshot = self.snapshot
+        if action == "create":
+            name, new = name.lower(), None
+        target = (new or "").lower() if action == "rename" else name
+        if action in ("rename", "create") and not valid_machine(target):
+            self.render_machines(content, editing=name if action == "rename" else None,
+                                 message=tr('Use lowercase letters, digits and hyphens.'))
+            return
+        if action == "create" and target in {info["name"] for info in snapshot.machines}:
+            self.render_machines(content, message=tr('A machine with this name already exists.'))
+            return
+        publish = self.window.publish.get_active()
+        branch = self.window.settings.get("branch", "")
+        def work():
+            paths = []
+            if action == "rename":
+                paths = rename_machine(snapshot.checkout, name, target)
+            elif action == "remove":
+                paths = remove_machine(snapshot.checkout, name)
+            elif action in ("create", "fresh"):
+                path = machine_path(snapshot.checkout, target)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(machine_text(target, {"defaults": "ask"}, hostname=platform.node(), omarchy=Probe().omarchy(),
+                                             updated=GLib.DateTime.new_now_utc().format_iso8601(), install=install_id()))
+                paths = [path]
+            if not paths or not publish:
+                return None
+            verb = {"rename": f"Rename machine {name} to {target}", "remove": f"Remove machine {name}",
+                    "create": f"Add machine {target}", "fresh": f"Start machine {name} fresh"}[action]
+            return checkout.publish(snapshot.checkout, branch, paths, verb)
+        def done(problem):
+            self.loading = False
+            settings = self.window.settings
+            if action in ("use", "create", "fresh") or (action == "rename" and name == snapshot.machine_name):
+                settings["machine"] = target
+            if action in ("create", "fresh"):
+                self.window.status.set_text(tr('This installation starts as a new machine. Review the customizations, then sync.'))
+            self.window.save_settings()
+            if problem:
+                self.window.status.set_text(tr('Not published: {problem}', problem=problem.splitlines()[0][:160]))
+            self.hide_machines()
+            self.refresh()
+        def failed(message):
+            self.loading = False
+            self.render_machines(content, message=message)
+        self.loading = True
+        self.window.worker(work, done, failed)
+
+
+def _walk(widget):
+    child = widget.get_first_child()
+    while child:
+        yield child
+        yield from _walk(child)
+        child = child.get_next_sibling()

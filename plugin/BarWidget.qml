@@ -1,4 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import qs.Ui as Ui
@@ -65,7 +67,7 @@ Ui.BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.waiting ? "\uf059" : "\uf1de"
+    iconComponent: syncIcon
     active: root.waiting
     tooltipText: root.waiting
                ? (root.language === "pt" ? "Omarchy Settings Sync\nAguardando sua resposta · clique para abrir"
@@ -78,6 +80,46 @@ Ui.BarWidget {
       if (mouseButton === Qt.LeftButton) {
         if (root.waiting) root.open()
         else root.toggle()
+      }
+    }
+  }
+
+  // Plugin icon: the square toggle knob inside a sync loop. Same geometry as
+  // plugin/icons/omarchy-settings-sync-symbolic.svg (24-unit grid), drawn as
+  // a vector so it follows the bar colour. BarIconButton loads it into its
+  // 16 px optical canvas in place of a font glyph.
+  Component {
+    id: syncIcon
+
+    Item {
+      id: syncGlyph
+      readonly property color tint: button.active && button.useActiveColor ? button.activeColor : button.foreground
+
+      Shape {
+        width: 24
+        height: 24
+        scale: syncGlyph.width / 24
+        transformOrigin: Item.TopLeft
+        preferredRendererType: Shape.CurveRenderer
+
+        ShapePath {
+          fillColor: syncGlyph.tint
+          strokeColor: "transparent"
+          strokeWidth: -1
+          PathSvg { path: "M2 15V5h16.59l-3-3L17 .59 23.41 7H4v8zM22 9v10H5.41l3 3L7 23.41.59 17H20V9zM12 9h6v6h-6z" }
+        }
+      }
+
+      // Waiting for the user's reply: the same icon in the bar's active
+      // colour, plus a dot just outside its top-right corner.
+      Rectangle {
+        visible: root.waiting
+        x: syncGlyph.width - 1
+        y: -3
+        width: 4
+        height: 4
+        radius: 2
+        color: syncGlyph.tint
       }
     }
   }

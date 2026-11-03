@@ -35,10 +35,22 @@ from outbox import Outbox
 from chat_view import ChatView
 from message_view import MessageBody
 from activity_indicator import ActivityIndicator
+from applier import delegation, removal
+from release import agent_request as release_request
+from updater import Updater, installed_version
+
+RUNNING_VERSION = installed_version()  # The code in memory; the copy on disk may be newer after an update.
+import checkout
+from features import machine_name
+from features_view import (FeaturesPage, changes_for_sync, collect, local_catalog, make_applier, results_path,
+                           run_changes, save_machine)
 
 NATIVE_AGENTS = {"codex", "claude"}
 DIRECTION_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
     str(Path(__file__).with_name('icons') / 'direction-upload-symbolic.svg')))
+APP_ICON_NAME = 'omarchy-settings-sync-symbolic'
+APP_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
+    str(Path(__file__).with_name('icons') / f'{APP_ICON_NAME}.svg')))
 
 from core import (
     AGENTS, ROOT, CodexClient, RpcError, cached_models, codex_defaults, default_agent, external_command,
@@ -133,7 +145,46 @@ class Panel(Gtk.Box):
         if self in self.owner.panels:
             self.owner.panels.remove(self)
             self.owner.overlay.remove_overlay(self)
-        self.owner.main_content.set_sensitive(not self.owner.panels)
+        self.owner.main_content.set_sensitive(not self.owner.overlays())
+        self.owner.update_buttons()
+
+
+class TabPanel(Gtk.Box):
+    """The Panel interface for a page shown as a tab, without an overlay card."""
+    def __init__(self, owner, name):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.owner = owner
+        self.name = name
+        self.on_close = self.destroy
+        self.previous = "chat"
+        self.scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.append(self.scroll)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(self, "set_margin_" + side)(14)
+
+    def set_content(self, content):
+        self.scroll.set_child(content)
+
+    def present(self):
+        pages = self.owner.pages
+        current = pages.get_visible_child_name()
+        self.previous = current if current in ("chat", "features") else "chat"
+        stale = pages.get_child_by_name(self.name)
+        if stale:
+            pages.remove(stale)
+        pages.add_named(self, self.name)
+        self.owner.panels.append(self)  # Before the tab toggles, so setup() sees it is open.
+        pages.set_visible_child_name(self.name)
+        self.owner.tab_for(self.name).set_active(True)
+        self.owner.update_buttons()
+
+    def destroy(self, *, back=True):
+        if self not in self.owner.panels:
+            return
+        self.owner.panels.remove(self)
+        if back:
+            self.owner.show_page(self.previous)
+        self.owner.pages.remove(self)
         self.owner.update_buttons()
 
 
@@ -150,7 +201,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         for edge in (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM, LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT):
             LayerShell.set_anchor(self, edge, True)
         self.popup_bounds = (0, 0, 560, 640)
-        self.set_icon_name("preferences-system-symbolic")
+        Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(
+            str(Path(__file__).with_name('icons')))
+        self.set_icon_name(APP_ICON_NAME)
         self.locations = paths()
         self.settings_file = self.locations["config"] / "settings.json"
         self.settings = read_json(self.settings_file, {})
@@ -211,6 +264,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.theme = Theme(self)
         self.theme_timer = GLib.timeout_add_seconds(2, self.refresh_theme)
         self.attention_timer = GLib.timeout_add_seconds(10, self.update_attention)
+        self.updater = Updater(self.locations["state"] / "update.json")
+        self.update_checking = False
+        if application.get_application_id() == "org.omarchy.AgentSettings":
+            # Only the real panel talks to GitHub; tests and screenshots use other IDs.
+            GLib.timeout_add_seconds(5, self.check_updates)
         self.update_attention(force=True)
         self.connect("notify::visible", lambda *_: self.update_attention(force=True))
         self.connect("close-request", self.close_window)
@@ -249,39 +307,45 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.popup_card.add_css_class("popup-card")
         header = box(False, 10)
         header.add_css_class("popup-header")
-        icon = Gtk.Image.new_from_icon_name("preferences-system-symbolic")
+        icon = Gtk.Image.new_from_gicon(APP_ICON)
         icon.set_pixel_size(26)
         header.append(icon)
         title = label("Omarchy Settings Sync", "title")
         title.set_selectable(False)
         title.set_hexpand(True)
         header.append(title)
-        settings_icon = Gtk.Image.new_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(
-            str(Path(__file__).with_name('icons') / 'settings-symbolic.svg'))))
-        settings_button = Gtk.Button(child=settings_icon, tooltip_text=tr('Settings'))
-        settings_button.update_property([Gtk.AccessibleProperty.LABEL], [tr('Settings')])
         self.history_button = Gtk.Button(icon_name='document-open-recent-symbolic', tooltip_text=tr('Conversation history'))
         self.history_button.update_property([Gtk.AccessibleProperty.LABEL], [tr('Conversation history')])
         self.history_button.connect('clicked', lambda *_: self.show_history())
         header.append(self.history_button)
-        settings_button.connect("clicked", lambda *_: self.setup())
         self.new_button = Gtk.Button(icon_name="list-add-symbolic", tooltip_text=tr('New chat'))
         self.new_button.connect("clicked", lambda *_: self.new_chat())
         header.append(self.new_button)
-        header.append(settings_button)
-        sync_content = box(False, 6)
-        sync_content.append(Gtk.Image.new_from_icon_name("view-refresh-symbolic"))
-        sync_content.append(Gtk.Label(label="Sync"))
-        self.sync_button = Gtk.Button(child=sync_content, tooltip_text=tr('Sync'))
-        self.sync_button.add_css_class("flat")
-        self.sync_button.connect("clicked", lambda *_: self.sync())
-        header.append(self.sync_button)
         self.popup_card.append(header)
+        tabs = box(False, 0)
+        tabs.add_css_class("view-tabs")
+        self.chat_tab = Gtk.ToggleButton(label=tr('Conversation'), active=True)
+        self.features_tab = Gtk.ToggleButton(label=tr('Customizations'), group=self.chat_tab)
+        for name, tab in (("chat", self.chat_tab), ("features", self.features_tab)):
+            tab.connect("toggled", lambda widget, page=name: widget.get_active() and self.show_page(page))
+            tabs.append(tab)
+        tabs.append(Gtk.Box(hexpand=True))
+        # Settings is about the plugin itself, so it sits apart on the right.
+        self.settings_tab = Gtk.ToggleButton(label=tr('Settings'), group=self.chat_tab)
+        self.settings_tab.connect("toggled", lambda widget: widget.get_active() and self.setup())
+        tabs.append(self.settings_tab)
+        self.popup_card.append(tabs)
         outer = box(spacing=10)
         for side in ("top", "bottom", "start", "end"):
             getattr(outer, "set_margin_" + side)(14)
-        self.main_content = outer
-        self.overlay = Gtk.Overlay(child=outer)
+        self.pages = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, transition_duration=120)
+        self.pages.add_named(outer, "chat")
+        self.features_page = FeaturesPage(self)
+        self.pages.add_named(self.features_page, "features")
+        self.sync_button = self.features_page.sync_button  # Sync lives in the Customizations tab.
+        self.features_pending = False
+        self.main_content = self.pages
+        self.overlay = Gtk.Overlay(child=self.pages)
         self.overlay.set_vexpand(True)
         self.popup_card.append(self.overlay)
         self.popup_canvas = Gtk.Fixed()
@@ -494,6 +558,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
             if self.panels:
                 self.panels[-1].on_close()
                 return True
+            if self.pages.get_visible_child_name() == "features" and self.features_page.showing_machines:
+                self.features_page.hide_machines()
+                return True
             # Escape closes a selector before it closes the whole panel.
             def close_popover(widget):
                 child = widget.get_first_child()
@@ -525,6 +592,52 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.save_settings()
         self.set_visible(False)
         self.quit_if_idle()
+
+    def check_updates(self, force=False, install=None):
+        """Daily release check; installs only while idle, and the new code loads on the next start."""
+        if self.update_checking or not (force or self.updater.due()):
+            return False
+        idle = not (self.busy or self.terminal_pid or self.delivery_pending)
+        install = idle and (self.settings.get("auto_update", True) if install is None else install)
+        self.update_checking = True
+        def done(_state):
+            self.update_checking = False
+            if self.setup_panel in self.panels:
+                self.refresh_update_status()
+        def failed(message):
+            self.update_checking = False
+            self.status.set_text(message)
+        self.worker(lambda: self.updater.check(install=install), done, failed)
+        if self.setup_panel in self.panels:
+            self.refresh_update_status()
+        return False
+
+    def update_status(self):
+        state = self.updater.state
+        on_disk = installed_version()
+        release = self.updater.available()
+        if self.update_checking:
+            return tr('Checking for updates…')
+        if on_disk and on_disk != RUNNING_VERSION:
+            return tr('Version {version} is installed. Close and reopen the panel to use it.', version=on_disk)
+        if release:
+            reason = {"branch": tr('This copy is on a test branch; switch it to main to update.'),
+                      "modified": tr('The installed copy has local edits.'),
+                      "not-git": tr('Update it with omarchy plugin update.')}.get(state.get("blocked"), "")
+            return " ".join(filter(None, [tr('Version {version} is available.', version=release["version"]), reason]))
+        if state.get("error"):
+            return tr('Could not check for updates: {problem}', problem=state["error"])
+        if state.get("checked"):
+            return tr('Up to date · checked {time}', time=time.strftime('%d/%m %H:%M', time.localtime(state["checked"])))
+        return ""
+
+    def refresh_update_status(self):
+        if getattr(self, "update_label", None):
+            self.update_label.set_text(self.update_status())
+            self.update_label.set_visible(bool(self.update_label.get_text()))
+        if getattr(self, "update_now", None):
+            release = self.updater.available()
+            self.update_now.set_visible(bool(release) and not self.updater.state.get("blocked") and not self.update_checking)
 
     def quit_if_idle(self):
         if self.get_visible() or self.busy or self.terminal_pid or self.question_windows or self.delivery_pending:
@@ -785,6 +898,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return mode if mode in CLAUDE_PERMISSION_MODES else 'default'
         return self.settings.get('permissions', 'auto')
 
+    def overlays(self):
+        """Panels drawn over the content; a settings tab does not cover anything."""
+        return [panel for panel in self.panels if isinstance(panel, Panel)]
+
+    def sync_available(self):
+        return (not self.busy and not self.terminal_pid and not self.delivery_pending
+                and not self.image_pastes and not self.overlays())
+
     def update_buttons(self):
         available = not self.busy and not self.terminal_pid and not self.delivery_pending and not self.image_pastes
         installed = bool(self.executables[self.agent()])
@@ -793,10 +914,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.send_button.set_sensitive(installed and not self.image_pastes)
         self.send_button.set_tooltip_text(tr('Enter: queue. Ctrl+Enter: send now. Shift+Enter: new line.')
                                          if running else tr('Enter: send. Shift+Enter: new line.'))
-        self.sync_button.set_sensitive(available and installed and not self.panels)
         self.terminal_button.set_sensitive(True)
-        self.new_button.set_sensitive(available and not self.panels)
-        self.history_button.set_sensitive(not self.panels)
+        self.new_button.set_sensitive(available and not self.overlays())
+        self.history_button.set_sensitive(not self.overlays())
         self.agent_select.set_sensitive(available)
         self.model_select.set_sensitive(available and bool(self.executables[self.agent()]) and self.agent() in MODEL_AGENTS)
         self.effort_select.set_sensitive(available and len(self.effort_values) > 1)
@@ -810,6 +930,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.spinner.set_spinning(working)
         self.update_queue()
         self.update_choices()
+        self.features_page.sync_sensitivity()
 
     def choices_available(self):
         return (self.agent() in NATIVE_AGENTS and bool(self.executables[self.agent()])
@@ -1235,9 +1356,121 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if not self.settings.get("repository"):
             self.setup()
             return
-        self.submit(tr('Sync'), sync=True)
+        if self.busy or self.terminal_pid or self.delivery_pending:
+            self.status.set_text(tr('Stop the current task first.'))
+            return
+        self.busy = True
+        self.status.set_text(tr('Checking the repository…'))
+        self.update_buttons()
+        def work():
+            snapshot = collect(self, fetch=True)
+            if not snapshot.catalog:
+                return snapshot, None
+            if snapshot.binding_needed:
+                return snapshot, "choose-machine"
+            return snapshot, run_changes(self, snapshot, changes_for_sync(snapshot))
+        def done(result):
+            snapshot, outcomes = result
+            if outcomes is None:
+                # Repositories without a catalog keep the agent-led sync.
+                self.busy = False
+                self.submit(tr('Sync'), sync=True)
+                return
+            if outcomes == "choose-machine":
+                self.busy = False
+                self.update_buttons()
+                self.status.set_text(tr('Choose which machine this installation is, then sync again.'))
+                self.show_page("features")
+                return
+            self.features_applied(snapshot, outcomes, snapshot.problem, sync=True)
+        self.worker(work, done)
 
-    def submit(self, text, sync=False, create=False, *, queued_entry=None, publish=None, review_existing=False, images=()):
+    def tab_for(self, name):
+        return {"chat": self.chat_tab, "features": self.features_tab, "settings": self.settings_tab}[name]
+
+    def show_page(self, name):
+        if name != "settings" and self.setup_panel in self.panels:
+            self.setup_panel.destroy(back=False)
+        self.pages.set_visible_child_name(name)
+        self.tab_for(name).set_active(True)
+        if name == "features":
+            self.features_page.refresh()
+        elif not self.panels:
+            self.input.grab_focus()
+
+    def features_applied(self, snapshot, outcomes, problem=None, sync=False):
+        """Report a plugin-side apply and hand anything left to the agent."""
+        self.busy = False
+        if "machine" not in self.settings:
+            self.settings["machine"] = snapshot.machine_name
+            self.save_settings()
+        self.update_buttons()
+        if any(outcome.delegated or outcome.errors for outcome in outcomes) or (sync and snapshot.errors):
+            text = delegation(outcomes, results_path(self), machine=snapshot.machine_name,
+                              catalog_errors=snapshot.errors)
+            self.show_page("chat")
+            self.submit(tr('Finish applying customizations'), features_task=text)
+        else:
+            changed = sum(len(outcome.done) for outcome in outcomes)
+            message = (tr('Customizations applied.') if not sync else
+                       tr('Synced: {count} changes applied.', count=changed) if changed else tr('No changes.'))
+            if problem:
+                note = tr('Used the local copy: {problem}') if sync else tr('Not published: {problem}')
+                message += " " + note.format(problem=problem.splitlines()[0][:160])
+            self.status.set_text(message)
+        self.features_page.refresh()
+
+    def remove_feature(self, snapshot, feature):
+        """Undo a customization here, then have the agent delete it from the repository."""
+        if self.busy or self.terminal_pid or self.delivery_pending:
+            self.status.set_text(tr('Stop the current task first.'))
+            return
+        self.busy = True
+        self.status.set_text(tr('Removing “{title}”…', title=feature.title))
+        self.update_buttons()
+        def work():
+            # Keep it off here even if the repository cleanup does not finish.
+            snapshot.machine.setdefault("features", {})[feature.id] = "off"
+            save_machine(self, snapshot, publish=False)
+            applier = make_applier(self, snapshot.checkout, snapshot.ledger)
+            outcome = applier.disable(feature, "default")
+            applier.finish([outcome])
+            return outcome
+        def done(outcome):
+            self.busy = False
+            self.update_buttons()
+            self.show_page("chat")
+            self.submit(tr('Remove “{title}” from the repository', title=feature.title), publish=True,
+                        features_task=removal(feature, outcome, results_path(self), machine=snapshot.machine_name,
+                                              local_catalog=local_catalog(self)))
+        self.worker(work, done)
+
+    def adjust_after_release(self, snapshot, feature, impact):
+        self.show_page("chat")
+        self.submit(tr('Adjust “{title}” after the Omarchy update', title=feature.title),
+                    features_task=release_request(feature, impact, snapshot.release["from"], snapshot.release["to"]))
+
+    def migrate_catalog(self):
+        self.show_page("chat")
+        self.submit(tr('Create the customizations catalog'), migrate=True)
+
+    def ask_agent_about_catalog(self, errors):
+        self.show_page("chat")
+        self.submit(tr('Fix the customizations catalog'), features_task=(
+            "CORRIGIR O CATÁLOGO DE CONFIGURAÇÕES. O plugin encontrou estes problemas em features.toml; "
+            "corrija o repositório seguindo a seção 'Catálogo de configurações' do procedimento e valide:\n"
+            + "\n".join(f"- {error}" for error in errors)))
+
+    def discuss_feature(self, feature):
+        self.show_page("chat")
+        buffer = self.input.get_buffer()
+        prefix = tr('About the customization “{title}” ({id}): ', title=feature.title, id=feature.id)
+        if not buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False).strip():
+            buffer.set_text(prefix)
+        self.input.grab_focus()
+
+    def submit(self, text, sync=False, create=False, *, queued_entry=None, publish=None, review_existing=False, images=(),
+               features_task=None, migrate=False):
         if self.busy or self.terminal_pid or self.delivery_pending:
             self.status.set_text(tr('Stop the current task first.'))
             return False
@@ -1263,7 +1496,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 sync=sync, publish=(self.publish.get_active() if publish is None else publish) or create, create=create,
                 review_existing=review_existing,
                 thread_id=self.thread_id if self.agent() in NATIVE_AGENTS else None,
-                locations=self.locations,
+                locations=self.locations, features_task=features_task, migrate=migrate,
+                machine=machine_name(self.settings),
+                checkout=checkout.location(self.locations["workspace"], self.settings["repository"]),
+                local_catalog=local_catalog(self),
             )
         except ValueError as error:
             self.failure(str(error))
@@ -1271,6 +1507,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.replay_context and not self.thread_id:
             prompt = transcript_context(self.replay_context) + prompt
         self.last_prompt = prompt
+        self.features_pending = bool(features_task or migrate or sync)
         self.stopping = False
         self.active_task = begin_task(
             self.locations, self.settings["repository"], self.settings.get("branch", ""),
@@ -1427,6 +1664,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.stopping = False
             self.update_buttons()
             self.save_settings()
+            if self.features_pending or self.pages.get_visible_child_name() == "features":
+                self.features_pending = False
+                self.features_page.refresh()
             self.drain_queue()
             GLib.idle_add(self.quit_if_idle)
         elif method == "client/disconnected":
@@ -1867,42 +2107,37 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
     def setup(self):
         if self.history_panel in self.panels:
-            return False
+            self.history_panel.destroy()
         locked = bool(self.busy or self.terminal_pid or self.delivery_pending or self.current_queue())
         if self.setup_panel in self.panels:
             return False
-        dialog = Panel(self, tr('Settings'))
+        dialog = TabPanel(self, "settings")
         self.setup_panel = dialog
-        content = box(spacing=12)
-        for side in ("top", "bottom", "start", "end"):
-            getattr(content, "set_margin_" + side)(24)
+        content = box(spacing=10)
+        content.add_css_class("settings-page")
+        content.set_margin_end(10)  # Keep fields clear of the overlay scrollbar.
         dialog.set_content(content)
-        if self.model_info.get_parent():
-            self.model_info.get_parent().remove(self.model_info)
-        content.append(self.model_info)
-        about = label(tr('Configure your system and apps, including third-party apps, with your agent. Save changes to your repository and sync your Omarchy machines.'), 'muted')
-        about.set_max_width_chars(48)
-        content.append(about)
+        def section(text, first=False):
+            heading = label(text.upper(), "feature-group")
+            heading.set_selectable(False)
+            if not first:
+                heading.set_margin_top(14)
+            content.append(heading)
+        section(tr('Repository'), first=True)
         repository = Gtk.Entry(placeholder_text=tr('owner/dotfiles'))
         repository.set_text(self.settings.get("repository", ""))
         content.append(self.control(tr('Repository for saving your settings'), repository))
         branch = Gtk.Entry(placeholder_text=tr('Default branch'))
         branch.set_text(self.settings.get("branch", ""))
         content.append(self.control(tr('Branch'), branch))
+        error_label = label("", "settings-error")
+        error_label.set_visible(False)
         is_claude = self.agent() == 'claude'
         modes = list(CLAUDE_PERMISSION_MODES) if is_claude else ["auto", "ask", "read"]
         mode = dropdown([tr('Auto review'), tr('Ask for approval'), tr('Accept edits'), tr('Plan mode')]
                         if is_claude else [tr('Auto review'), tr('Ask for approval'), tr('Read only')])
         current_mode = self.permission_mode()
         mode.set_selected(modes.index(current_mode) if current_mode in modes else 0)
-        permissions = self.control(tr('Claude permissions') if is_claude else tr('Codex permissions'), mode)
-        permissions.set_visible(self.agent() in NATIVE_AGENTS)
-        content.append(permissions)
-        error_label = label("")
-        error_label.set_visible(False)
-        content.append(error_label)
-        buttons = box(False, 10)
-        buttons.set_homogeneous(True)
         def save(create=False, review_existing=False):
             try:
                 value = repository_url(repository.get_text())
@@ -1926,40 +2161,88 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.submit(tr('Create my configuration repository'), create=True)
             elif review_existing:
                 self.submit(tr('Review my existing customizations'), review_existing=True)
+        buttons = box(False, 6)
         existing = Gtk.Button(label=tr('Use repository'))
-        existing.set_hexpand(True)
         existing.add_css_class("suggested-action")
         existing.connect("clicked", lambda *_: save())
         create = Gtk.Button(label=tr('Create repository'))
+        create.add_css_class("flat")
+        create.add_css_class("link-action")
         create.set_tooltip_text(tr('Ask the agent to create the repository entered above. This address is saved for future syncs.'))
         create.connect("clicked", lambda *_: save(True))
         buttons.append(existing)
         buttons.append(create)
         content.append(buttons)
-        review = Gtk.Button(label=tr('Review existing customizations'))
+        content.append(error_label)
+        section(tr('Agent'))
+        if self.model_info.get_parent():
+            self.model_info.get_parent().remove(self.model_info)
+        content.append(self.model_info)
+        permissions = self.control(tr('Claude permissions') if is_claude else tr('Codex permissions'), mode)
+        permissions.set_visible(self.agent() in NATIVE_AGENTS)
+        content.append(permissions)
+        resume = Gtk.Button(label=tr('Continue conversation in terminal'), halign=Gtk.Align.START)
+        resume.add_css_class("flat")
+        resume.add_css_class("link-action")
+        resume.add_css_class("inline-link")
+        resume.set_sensitive(not locked and bool(self.thread_id) and self.agent() in NATIVE_AGENTS)
+        resume.connect("clicked", lambda *_: self.resume_in_terminal())
+        content.append(resume)
+        section(tr('Existing customizations'))
+        hint = label(tr('Find portable changes already on this machine and choose what to save to your repository.'), "feature-subtitle")
+        content.append(hint)
+        review = Gtk.Button(label=tr('Review existing customizations'), halign=Gtk.Align.START)
+        review.add_css_class("flat")
+        review.add_css_class("link-action")
+        review.add_css_class("inline-link")
         review.set_tooltip_text(tr('Find portable changes already on this machine and choose what to save to your repository.'))
         review.set_sensitive(not locked and bool(self.executables[self.agent()]))
         review.connect('clicked', lambda *_: save(review_existing=True))
         content.append(review)
-        resume = Gtk.Button(label=tr('Continue conversation in terminal'))
-        resume.set_sensitive(not locked and bool(self.thread_id) and self.agent() in NATIVE_AGENTS)
-        resume.connect("clicked", lambda *_: self.resume_in_terminal())
-        content.append(resume)
-        version = read_json(ROOT / 'manifest.json', {}).get('version')
+        version = RUNNING_VERSION
         if version:
+            section(tr('About'))
             footer = label('v' + version, 'muted', selectable=True)
             footer.set_wrap(False)
             footer.add_css_class('settings-version')
-            footer.set_halign(Gtk.Align.END)
             version_row = box(False, 8)
-            version_row.set_halign(Gtk.Align.END)
+            version_row.append(footer)
             repository_link = Gtk.LinkButton(uri='https://github.com/JohanKRS/omarchy-settings-sync', label='GitHub')
             repository_link.set_tooltip_text(tr('Project repository'))
             repository_link.add_css_class('flat')
             repository_link.get_child().add_css_class('settings-version')
             version_row.append(repository_link)
-            version_row.append(footer)
-            dialog.append(version_row)
+            content.append(version_row)
+            automatic = box(False, 8)
+            automatic_label = label(tr('Update automatically'))
+            automatic_label.set_hexpand(True)
+            automatic.append(automatic_label)
+            automatic_switch = Gtk.Switch(active=self.settings.get("auto_update", True), valign=Gtk.Align.CENTER)
+            automatic_switch.set_tooltip_text(tr('Install new GitHub releases of this plugin when the panel is idle.'))
+            automatic_switch.update_property([Gtk.AccessibleProperty.LABEL], [tr('Update automatically')])
+            def automatic_changed(widget, _):
+                self.settings["auto_update"] = widget.get_active()
+                self.save_settings()
+            automatic_switch.connect("notify::active", automatic_changed)
+            automatic.append(automatic_switch)
+            content.append(automatic)
+            self.update_label = label("", "feature-subtitle")
+            content.append(self.update_label)
+            update_actions = box(False, 4)
+            check = Gtk.Button(label=tr('Check now'))
+            check.add_css_class("flat")
+            check.add_css_class("link-action")
+            check.add_css_class("inline-link")
+            check.connect("clicked", lambda *_: self.check_updates(force=True))
+            update_actions.append(check)
+            self.update_now = Gtk.Button(label=tr('Update now'))
+            self.update_now.add_css_class("flat")
+            self.update_now.add_css_class("link-action")
+            self.update_now.connect("clicked", lambda *_: self.check_updates(force=True, install=True))
+            update_actions.append(self.update_now)
+            content.append(update_actions)
+            self.refresh_update_status()
+            self.settings_about = content
         if locked:
             for widget in (repository, branch, mode, existing, create):
                 widget.set_sensitive(False)
