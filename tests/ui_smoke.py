@@ -899,20 +899,63 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         page.machine_action(content, "remove", other)
         wait(lambda: not page.loading and not (checkout_dir / f"machines/{other}.toml").exists())
         page.hide_machines()
-        # Removing a customization undoes it here and asks the agent to delete it from the repository.
+        # A long list keeps its place when a switch or a removal re-renders it,
+        # and focus stays on the control that was used.
+        from features import Feature, Part
+        page.fetched = time.monotonic()  # Still never fetch the fictional remote.
         page.refresh()
         wait(lambda: not page.loading and page.snapshot.features)
+        page.snapshot.features += [Feature(id=f"extra-{n}", title=f"Extra {n}", group="desktop", parts=[
+            Part("agent", {"kind": "agent", "title": "Step", "instructions": "Do it"}, 0)]) for n in range(40)]
+        page.expanded.add("extra-35")
+        page.render()
+        adjustment = page.scroll.get_vadjustment()
+        wait(lambda: adjustment.get_upper() > adjustment.get_page_size() * 2)
+        adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
+        settle()
+        bottom = adjustment.get_value()
+        assert bottom > 0
+        remove = page.targets[("extra-35", "removal")]
+        assert remove.get_label() == tr("Remove from repository")
+        remove.grab_focus()
+        remove.emit("clicked")
+        settle()
+        assert page.staged["extra-35"] == {"remove": True}, page.staged
+        assert abs(adjustment.get_value() - bottom) < 2, (adjustment.get_value(), bottom)
+        assert window.get_focus() is page.targets[("extra-35", "removal")], "Focus stays on the removal control"
+        assert page.targets[("extra-35", "removal")].get_label() == tr("Keep in the repository")
+        assert not page.targets[("extra-35", "switch")].get_sensitive()
+        assert page.bar_text.get_text().startswith(tr('{count} to remove from the repository', count=1))
+        switch = page.targets[("extra-30", "switch")]
+        switch.grab_focus()
+        switch.set_active(True)
+        settle()
+        assert abs(adjustment.get_value() - bottom) < 2, (adjustment.get_value(), bottom)
+        assert window.get_focus() is page.targets[("extra-30", "switch")]
+        page.targets[("extra-35", "removal")].emit("clicked")
+        assert "extra-35" not in page.staged
+        page.discard()
+        page.search.set_text("Extra 1")
+        wait(lambda: adjustment.get_value() == 0)  # A new search starts at the top.
+        page.search.set_text("")
+        # Removing is staged like a switch; Apply deletes it from the repository
+        # without a question or the agent when nothing else mentions it.
+        page.refresh()
+        wait(lambda: not page.loading and len(page.snapshot.features) == 2)
         lock = next(f for f in page.snapshot.features if f.id == "lock")
-        page.expanded.add("lock")
-        page.ask_removal(lock)
-        wait(lambda: any(isinstance(w, Gtk.Button) and w.get_label() == tr("Remove everywhere") for w in widgets(page.listing)))
-        with patch.object(window, "submit", return_value=True) as removal_request:
-            page.remove(lock)
-            wait(lambda: removal_request.called)
-            assert removal_request.call_args.kwargs["publish"] is True
-            assert removal_request.call_args.kwargs["features_task"].startswith("REMOVER")
-        machine_file = checkout_dir / f"machines/{page.snapshot.machine_name}.toml"
-        assert '"lock" = "off"' in machine_file.read_text() or 'lock = "off"' in machine_file.read_text(), machine_file.read_text()
+        page.stage_removal(lock)
+        wait(lambda: page.apply_button.get_visible())
+        with patch.object(features_view.checkout, "publish", return_value=None) as push, \
+                patch.object(window, "submit", return_value=True) as cleanup:
+            page.apply_button.emit("clicked")
+            wait(lambda: push.called and not page.loading)
+            cleanup.assert_not_called()
+            published = [Path(path).name for path in push.call_args.args[2]]
+            assert "features.toml" in published and push.call_args.args[3] == "Remove customization lock", push.call_args
+        assert 'id = "lock"' not in (checkout_dir / "features.toml").read_text()
+        assert window.status.get_text() == tr('“{title}” was removed from the repository.', title=lock.title)
+        assert window.pages.get_visible_child_name() == "features", "Removing keeps the Customizations tab open"
+        wait(lambda: not page.loading and [f.id for f in page.snapshot.features] == ["idle"])
         wait(lambda: not window.busy)
         window.close_client()
         with patch.object(window, "quit_if_idle") as cleanup:

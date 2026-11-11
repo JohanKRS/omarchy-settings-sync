@@ -181,7 +181,8 @@ class Theme:
             .status-dot {{ font-size: {max(1, size - 4)}px; }}
             .status-dot.status-applied {{ color: {good}; }}
             .status-dot.status-pending, .status-dot.status-staged {{ color: {warning}; }}
-            .status-dot.status-modified {{ color: {urgent}; }}
+            .status-dot.status-modified, .status-dot.status-remove {{ color: {urgent}; }}
+            .feature-row.removing .feature-title {{ text-decoration-line: line-through; color: alpha({fg}, .55); }}
             .status-dot.status-off, .status-dot.status-unavailable {{ color: alpha({fg}, .35); }}
             .feature-pill {{ font-size: {max(1, size - 2)}px; color: {accent}; background: alpha({accent}, .14);
                              padding: 1px 8px; border-radius: {max(radius, 4)}px; }}

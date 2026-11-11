@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- Requests that change something already saved extend that customization
+  instead of adding a second switch: the agent receives the saved list and
+  keeps the existing `id`, and validation rejects two features that change
+  the same file, line or key.
+- Simpler removal: **Remove from repository** is staged like a switch and
+  needs no confirmation dialog or questions. Apply undoes it here, deletes the
+  catalog entry, machine choices and its own source files, and publishes them
+  itself; the agent only tidies leftover mentions in the documentation,
+  without leaving the Customizations tab. It no longer undoes parts this
+  machine never applied.
+- What turning a customization off does on this machine is one compact choice
+  instead of three options next to the remove button.
+- The Customizations list keeps its scroll position and focus when a switch
+  or a removal re-renders it, instead of jumping back to the top.
+
 ## 0.2.2 — 2026-11-03
 
 - Open links, such as GitHub in Settings and links in the conversation, with

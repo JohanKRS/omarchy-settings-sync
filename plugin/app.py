@@ -36,15 +36,14 @@ from chat_view import ChatView
 import message_view
 from message_view import MessageBody
 from activity_indicator import ActivityIndicator
-from applier import delegation, removal
+from applier import delegation, needs_agent, removal
 from release import agent_request as release_request
 from updater import Updater, installed_version
 
 RUNNING_VERSION = installed_version()  # The code in memory; the copy on disk may be newer after an update.
 import checkout
 from features import machine_name
-from features_view import (FeaturesPage, changes_for_sync, collect, local_catalog, make_applier, results_path,
-                           run_changes, save_machine)
+from features_view import FeaturesPage, changes_for_sync, collect, local_catalog, results_path, run_changes
 
 NATIVE_AGENTS = {"codex", "claude"}
 DIRECTION_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
@@ -1428,52 +1427,53 @@ class SettingsWindow(Gtk.ApplicationWindow):
         elif not self.panels:
             self.input.grab_focus()
 
-    def features_applied(self, snapshot, outcomes, problem=None, sync=False):
+    def features_applied(self, snapshot, outcomes, problem=None, sync=False, removed=None):
         """Report a plugin-side apply and hand anything left to the agent."""
         self.busy = False
         if "machine" not in self.settings:
             self.settings["machine"] = snapshot.machine_name
             self.save_settings()
         self.update_buttons()
-        if any(outcome.delegated or outcome.errors for outcome in outcomes) or (sync and snapshot.errors):
-            text = delegation(outcomes, results_path(self), machine=snapshot.machine_name,
-                              catalog_errors=snapshot.errors)
-            self.show_page("chat")
-            self.submit(tr('Finish applying customizations'), features_task=text)
+        entries = (removed or {}).get("entries", [])
+        published = (removed or {}).get("problem")
+        removing = {feature.id for feature, _ in entries}
+        rest = [outcome for outcome in outcomes if outcome.feature.id not in removing]
+        local = any(outcome.delegated or outcome.errors for outcome in rest) or (sync and snapshot.errors)
+        cleanup = [(feature, done) for feature, done in entries if needs_agent(feature, done, outcomes, published)]
+        if local or cleanup:
+            tasks = []
+            if cleanup:
+                ids = {feature.id for feature, _ in cleanup}
+                tasks.append(removal(cleanup, [o for o in outcomes if o.feature.id in ids], results_path(self),
+                                     machine=snapshot.machine_name, local_catalog=local_catalog(self),
+                                     problem=published))
+            if local:
+                tasks.append(delegation(rest, results_path(self), machine=snapshot.machine_name,
+                                        catalog_errors=snapshot.errors))
+            if local or any(o.delegated or o.errors for o in outcomes):
+                self.show_page("chat")  # Work on this machine: follow it in the conversation.
+            if cleanup and len(entries) == 1:
+                title = tr('Remove “{title}” from the repository', title=entries[0][0].title)
+            elif cleanup:
+                title = tr('Remove {count} customizations from the repository', count=len(entries))
+            else:
+                title = tr('Finish applying customizations')
+            started = self.submit(title, features_task="\n\n".join(tasks), publish=True if cleanup else None)
+            if started and cleanup and self.pages.get_visible_child_name() == "features":
+                self.status.set_text(tr('Removed here. The agent is tidying the repository’s documentation…'))
         else:
             changed = sum(len(outcome.done) for outcome in outcomes)
             message = (tr('Customizations applied.') if not sync else
                        tr('Synced: {count} changes applied.', count=changed) if changed else tr('No changes.'))
+            if len(entries) == 1:
+                message = tr('“{title}” was removed from the repository.', title=entries[0][0].title)
+            elif entries:
+                message = tr('{count} customizations were removed from the repository.', count=len(entries))
             if problem:
                 note = tr('Used the local copy: {problem}') if sync else tr('Not published: {problem}')
                 message += " " + note.format(problem=problem.splitlines()[0][:160])
             self.status.set_text(message)
         self.features_page.refresh()
-
-    def remove_feature(self, snapshot, feature):
-        """Undo a customization here, then have the agent delete it from the repository."""
-        if self.busy or self.terminal_pid or self.delivery_pending:
-            self.status.set_text(tr('Stop the current task first.'))
-            return
-        self.busy = True
-        self.status.set_text(tr('Removing “{title}”…', title=feature.title))
-        self.update_buttons()
-        def work():
-            # Keep it off here even if the repository cleanup does not finish.
-            snapshot.machine.setdefault("features", {})[feature.id] = "off"
-            save_machine(self, snapshot, publish=False)
-            applier = make_applier(self, snapshot.checkout, snapshot.ledger)
-            outcome = applier.disable(feature, "default")
-            applier.finish([outcome])
-            return outcome
-        def done(outcome):
-            self.busy = False
-            self.update_buttons()
-            self.show_page("chat")
-            self.submit(tr('Remove “{title}” from the repository', title=feature.title), publish=True,
-                        features_task=removal(feature, outcome, results_path(self), machine=snapshot.machine_name,
-                                              local_catalog=local_catalog(self)))
-        self.worker(work, done)
 
     def adjust_after_release(self, snapshot, feature, impact):
         self.show_page("chat")

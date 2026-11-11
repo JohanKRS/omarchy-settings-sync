@@ -122,6 +122,18 @@ and keep the current state, or restore the backup taken before it was first
 applied. A destination edited outside the plugin is shown as **Edited locally**
 and is never overwritten; the agent reconciles it.
 
+A request that changes or adds options to something already in the catalog
+edits that feature, keeping its `id` so every machine's choice still applies;
+the agent receives the list of saved customizations with each request. Two
+features that change the same file, line or key fail `features.py validate`.
+
+**Remove from repository** is staged until **Apply**, like a switch. The panel
+then undoes the feature on this machine as its off choice says, deletes its
+catalog entry, its choices in `machines/` and the source files only it used, and
+publishes one commit. The agent is called only for what the panel cannot judge,
+such as mentions in README or SYNC.md, and is told not to ask questions. Other
+machines undo the feature on their next Sync.
+
 Choices are stored in `machines/<name>.toml`. The name starts as the hostname.
 **Manage machines** in the Customizations tab lists every machine in the
 repository with its hostname, Omarchy version and last update, and lets you

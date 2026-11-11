@@ -913,22 +913,53 @@ def orphans(ledger, features):
     return result
 
 
-def removal(feature, outcome, results_path, *, machine, local_catalog=None):
-    """Ask the agent to delete a customization from the repository after it was undone here."""
-    where = (f"do catálogo local {local_catalog}" if feature.local and local_catalog
-             else "de features.toml no repositório de configurações")
+def removal(entries, outcomes, results_path, *, machine, local_catalog=None, problem=None):
+    """Ask the agent for what the plugin left of removing customizations from the repository.
+
+    `entries` are (feature, Removal or None): None means the plugin could not
+    edit the catalog itself. `problem` is why publishing the plugin's edit failed.
+    """
+    names = ", ".join(f"'{feature.title}' ({feature.id})" for feature, _ in entries)
     lines = [
-        f"REMOVER PERSONALIZAÇÃO DO REPOSITÓRIO. O usuário pediu para remover '{feature.title}' "
-        f"({feature.id}) de todas as máquinas, e isso autoriza publicar a remoção.",
-        f"O plugin já desfez nesta máquina ({machine}) o que conseguiu, voltando ao padrão do Omarchy.",
-        f"No repositório: remova a entrada {where}, os arquivos de origem usados apenas por ela, as "
-        "menções em README e SYNC.md e as entradas dela em machines/*.toml. Ajuste `requires` de outras "
-        "personalizações que dependiam dela e não altere mais nada. Valide o catálogo e publique.",
-        "As outras máquinas desfazem esta personalização no próximo Sync, pelo registro local de cada uma.",
+        f"REMOVER PERSONALIZAÇÃO DO REPOSITÓRIO. O usuário confirmou no painel a remoção de {names} "
+        "de todas as máquinas, e isso autoriza publicar a remoção. Não faça perguntas nem peça outra "
+        "confirmação: faça só o que está listado abaixo, valide o catálogo e publique. Não recrie nem "
+        "substitua a personalização e não altere mais nada.",
+        f"Nesta máquina ({machine}) o plugin já a desfez como o usuário escolheu. As outras máquinas a "
+        "desfazem no próximo Sync, pelo registro local de cada uma.",
     ]
-    if outcome.delegated or outcome.errors:
-        lines += ["", "Ainda falta desfazer nesta máquina:", delegation([outcome], results_path, machine=machine)]
+    for feature, done in entries:
+        where = (f"do catálogo local {local_catalog}" if feature.local and local_catalog
+                 else "de features.toml no repositório de configurações")
+        lines.append("")
+        if done is None:
+            lines.append(
+                f"- {feature.id}: remova a entrada {where}, os arquivos de origem usados apenas por ela, as "
+                "menções em README e SYNC.md e as entradas dela em machines/*.toml. Ajuste `requires` de "
+                "outras personalizações que dependiam dela.")
+            continue
+        published = ("Essas alterações estão na cópia local, mas a publicação falhou: "
+                     f"{problem.splitlines()[0][:200]}. Incorpore o remoto e publique-as." if problem and not feature.local
+                     else "Isso já foi publicado." if not feature.local else "")
+        lines.append(f"- {feature.id}: o plugin já tirou a entrada {where}, as escolhas em machines/*.toml e "
+                     f"os arquivos usados só por ela ({', '.join(done.deleted) or 'nenhum'}). {published}".rstrip())
+        if done.mentions:
+            lines.append("  Remova ou ajuste estas menções na documentação, sem mudar o resto do texto:")
+            lines += [f"  {mention}" for mention in done.mentions[:40]]
+        if done.leftovers:
+            lines.append("  Estes arquivos ficaram na pasta dela; apague os que serviam apenas a ela:")
+            lines += [f"  {name}" for name in done.leftovers[:40]]
+    left = [outcome for outcome in outcomes if outcome.delegated or outcome.errors]
+    if left:
+        lines += ["", "Ainda falta desfazer nesta máquina:", delegation(left, results_path, machine=machine)]
     return "\n".join(lines)
+
+
+def needs_agent(feature, done, outcomes, problem=None):
+    """Whether removing one customization still has work for the agent."""
+    if done is None or done.mentions or done.leftovers or (problem and not feature.local):
+        return True
+    return any(outcome.feature.id == feature.id and (outcome.delegated or outcome.errors) for outcome in outcomes)
 
 
 def status(feature, choice, mode, ledger, states, failing=None):
