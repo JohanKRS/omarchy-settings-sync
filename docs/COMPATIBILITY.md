@@ -49,7 +49,8 @@ surface: the window behind the panel stays active. Superwhisper therefore
 declines to type into the panel and, because a panel holds the keyboard, leaves
 the dictation on the clipboard and records why in its runtime `last.json`.
 While the panel is shown, `plugin/dictation.py` watches that file and types
-such a dictation at the panel's cursor, in the focused field or the composer.
+such a dictation at the panel's cursor, in the focused field or the composer,
+while the panel has the keyboard.
 Nothing is read while the panel is hidden, and dictations Superwhisper typed or
 pasted elsewhere, or copied by the user's choice, are left alone.
 

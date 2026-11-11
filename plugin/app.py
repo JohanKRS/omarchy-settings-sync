@@ -576,6 +576,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
         The focused field takes it; with nothing editable focused, the composer
         does when it is on screen. Elsewhere the text stays on the clipboard."""
+        if not self.is_active():
+            return False  # Another surface has the keyboard; the dictation was not for the panel.
         widget = self.get_focus()
         if widget is not None and widget is self.vte:
             widget.paste_text(text)
