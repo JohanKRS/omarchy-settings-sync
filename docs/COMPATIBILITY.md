@@ -44,6 +44,15 @@ speed up reopening. Idle agent connections are closed separately. Theme polling
 pauses while hidden; the VTE terminal is initialized only when an external CLI
 is launched. There is no permanent background sync service.
 
+Dictation tools that type into Hyprland's active window cannot reach a layer
+surface: the window behind the panel stays active. Superwhisper therefore
+declines to type into the panel and, because a panel holds the keyboard, leaves
+the dictation on the clipboard and records why in its runtime `last.json`.
+While the panel is shown, `plugin/dictation.py` watches that file and types
+such a dictation at the panel's cursor, in the focused field or the composer.
+Nothing is read while the panel is hidden, and dictations Superwhisper typed or
+pasted elsewhere, or copied by the user's choice, are left alone.
+
 ## Validation
 
 Portable checks cover repository packaging, links, JSON, Python/shell syntax,

@@ -33,6 +33,7 @@ from catalog import MODEL_AGENTS, DISCOVERY_AGENTS, agent_executable, discover_m
 from claude_client import ClaudeClient, PERMISSION_MODES as CLAUDE_PERMISSION_MODES
 from outbox import Outbox
 from chat_view import ChatView
+from dictation import DictationInbox, spaced
 import message_view
 from message_view import MessageBody
 from activity_indicator import ActivityIndicator
@@ -273,6 +274,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
             GLib.timeout_add_seconds(5, self.check_updates)
         self.update_attention(force=True)
         self.connect("notify::visible", lambda *_: self.update_attention(force=True))
+        self.dictation = DictationInbox(self.insert_dictation)
+        self.connect("notify::visible", lambda *_: self.dictation.watch(self.get_visible()))
         self.connect("close-request", self.close_window)
         self.connect("map", self.focus_content)
         keys = Gtk.EventControllerKey()
@@ -567,6 +570,41 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if not self.panels:
             target = self.vte if self.terminal_pid and self.vte else self.input
             target.grab_focus()
+
+    def insert_dictation(self, text):
+        """Type a Superwhisper dictation at the panel's cursor (see dictation.py).
+
+        The focused field takes it; with nothing editable focused, the composer
+        does when it is on screen. Elsewhere the text stays on the clipboard."""
+        widget = self.get_focus()
+        if widget is not None and widget is self.vte:
+            widget.paste_text(text)
+            return True
+        if isinstance(widget, Gtk.Text) and not widget.get_visibility():
+            return False  # Never type a dictation into a secret answer.
+        if isinstance(widget, Gtk.Editable) and widget.get_editable():
+            widget.delete_selection()
+            position = widget.get_position()
+            text = spaced(text, widget.get_chars(position - 1, position) if position else "",
+                          widget.get_chars(position, position + 1))
+            widget.set_position(widget.insert_text(text, position))
+            return True
+        if not (isinstance(widget, Gtk.TextView) and widget.get_editable()):
+            if not (self.input.get_mapped() and self.input.is_sensitive()):
+                return False
+            widget = self.input
+            widget.grab_focus()
+        buffer = widget.get_buffer()
+        buffer.begin_user_action()
+        buffer.delete_selection(True, True)
+        cursor = buffer.get_iter_at_mark(buffer.get_insert())
+        before, after = cursor.copy(), cursor.copy()
+        before.backward_char()
+        after.forward_char()
+        buffer.insert_at_cursor(spaced(text, buffer.get_text(before, cursor, True),
+                                       buffer.get_text(cursor, after, True)))
+        buffer.end_user_action()
+        return True
 
     def popup_key(self, _controller, key, _code, _state):
         if key == Gdk.KEY_Escape:
