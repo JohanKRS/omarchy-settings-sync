@@ -49,6 +49,8 @@ and 3.14; graphical and shell integration checks require an Omarchy session.
 - `plugin/message_markup.py` parses Markdown and restricts inline markup/links;
   `plugin/message_view.py` builds the native message widgets. The pinned parser
   and its update instructions are in `plugin/_vendor/`.
+- `plugin/dictation.py` types Superwhisper dictations that it could not insert
+  into the panel, a layer surface, at the panel's cursor.
 - `plugin/WORKFLOW.md` contains the instructions sent to the agent for syncs.
 
 See [compatibility notes](docs/COMPATIBILITY.md) before changing shell integration.

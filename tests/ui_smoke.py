@@ -965,6 +965,27 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert window.pages.get_visible_child_name() == "features", "Removing keeps the Customizations tab open"
         wait(lambda: not page.loading and [f.id for f in page.snapshot.features] == ["idle"])
         wait(lambda: not window.busy)
+        # New chat opens the empty conversation on its tab, from whichever tab is showing.
+        for name in ("features", "settings"):
+            window.add_message('You', 'Start over from ' + name, save=False)
+            window.setup() if name == "settings" else window.show_page(name)
+            wait(lambda: not page.loading)
+            assert window.pages.get_visible_child_name() == name and window.new_button.get_sensitive()
+            window.new_button.emit("clicked")
+            assert window.pages.get_visible_child_name() == "chat" and window.chat_tab.get_active(), name
+            assert not window.messages and window.content.get_visible_child_name() == "empty", name
+            # The fixture never takes the keyboard, so the window stays inactive: check the focus widget.
+            assert window.setup_panel not in window.panels and window.get_focus() is window.input, name
+        # Opening a conversation from history does the same.
+        window.show_page("features")
+        wait(lambda: not page.loading)
+        window.show_history()
+        record = window.history.entries()[0]
+        row = next(w for w in widgets(window.history_panel) if isinstance(w, Gtk.Button)
+                   and (w.get_tooltip_text() or '').startswith(record['name']))
+        row.emit("clicked")
+        assert window.history_id == record['id'] and window.history_panel not in window.panels
+        assert window.pages.get_visible_child_name() == "chat" and window.chat_tab.get_active()
         window.close_client()
         with patch.object(window, "quit_if_idle") as cleanup:
             window.popup_key(None, Gdk.KEY_Escape, 0, 0)
