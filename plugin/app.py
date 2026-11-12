@@ -325,7 +325,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.history_button.connect('clicked', lambda *_: self.show_history())
         header.append(self.history_button)
         self.new_button = Gtk.Button(icon_name="list-add-symbolic", tooltip_text=tr('New chat'))
-        self.new_button.connect("clicked", lambda *_: self.new_chat())
+        self.new_button.connect("clicked", lambda *_: self.start_new_chat())
         header.append(self.new_button)
         self.popup_card.append(header)
         tabs = box(False, 0)
@@ -2059,9 +2059,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
         while self.transcript.get_first_child():
             self.transcript.remove(self.transcript.get_first_child())
 
+    def start_new_chat(self):
+        """The header's New chat opens the empty conversation, whichever tab is showing."""
+        if self.new_chat():
+            self.show_page("chat")
+
     def new_chat(self):
         if not self.can_switch_conversation():
-            return
+            return False
         self.save_conversation()
         self.queue_paused = False
         self.close_client()
@@ -2078,6 +2083,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.status.set_text(tr('Ready'))
         self.show_idle_content()
         self.update_buttons()
+        return True
 
     def show_history(self):
         if self.history_panel in self.panels:
@@ -2119,7 +2125,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 row.append(detail)
                 button = Gtk.Button(child=row, tooltip_text=record['name'] + ('\n' + repo if repo else ''))
                 button.set_sensitive(current or self.can_switch_conversation())
-                button.connect('clicked', lambda _, key=record['id']: self.open_conversation(key))
+                button.connect('clicked', lambda _, key=record['id']: self.open_conversation(key)
+                               and self.show_page('chat'))
                 listing.append(button)
             if not listing.get_first_child():
                 listing.append(label(tr('No conversations found.'), 'muted'))
