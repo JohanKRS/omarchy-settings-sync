@@ -248,7 +248,7 @@ class CodexClient:
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
         self.request("initialize", {
-            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.2.2"},
+            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.2.3"},
             "capabilities": {"experimentalApi": True},
         })
         self.notify("initialized", {})

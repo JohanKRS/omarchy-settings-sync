@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "community.agent-settings",
   "name": "Omarchy Settings Sync",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "author": "JohanKRS",
   "license": "MIT",
   "description": "Change your system and apps by asking your agent, keep every change in your own Git repository, and choose per machine what to sync: one switch per customization.",

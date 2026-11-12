@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 — 2026-11-11
 
+- **New chat** opens the empty Conversation tab with the composer focused,
+  even when Customizations or Settings was showing, where nothing seemed to
+  happen before. Opening a conversation from history does the same.
 - Requests that change something already saved extend that customization
   instead of adding a second switch: the agent receives the saved list and
   keeps the existing `id`, and validation rejects two features that change
@@ -16,6 +19,13 @@
   instead of three options next to the remove button.
 - The Customizations list keeps its scroll position and focus when a switch
   or a removal re-renders it, instead of jumping back to the top.
+- Superwhisper dictations reach the panel. Superwhisper types into the
+  window behind the panel, so a dictation only reached the clipboard; while
+  the panel has the keyboard, it is now typed at the panel's cursor, in the
+  focused field, the agent terminal or the composer.
+- The README, the marketplace descriptions and `preview.png` present the
+  per-machine switches, with synthetic Customizations, Machines and
+  post-update screenshots.
 
 ## 0.2.2 — 2026-11-03
 
