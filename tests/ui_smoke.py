@@ -911,11 +911,17 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         page.render()
         adjustment = page.scroll.get_vadjustment()
         wait(lambda: adjustment.get_upper() > adjustment.get_page_size() * 2)
+        settle()  # render() holds the old position for two frames; scroll after that.
         adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
         settle()
         bottom = adjustment.get_value()
         assert bottom > 0
+        def on_screen(widget):
+            # Focusing a control outside the viewport scrolls to it, which is not what is tested here.
+            ok, bounds = widget.compute_bounds(page.scroll)
+            return ok and bounds.get_y() >= 0 and bounds.get_y() + bounds.get_height() <= page.scroll.get_height()
         remove = page.targets[("extra-35", "removal")]
+        assert on_screen(remove), "The panel is too short for this test"
         assert remove.get_label() == tr("Remove from repository")
         remove.grab_focus()
         remove.emit("clicked")
@@ -926,12 +932,14 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert page.targets[("extra-35", "removal")].get_label() == tr("Keep in the repository")
         assert not page.targets[("extra-35", "switch")].get_sensitive()
         assert page.bar_text.get_text().startswith(tr('{count} to remove from the repository', count=1))
-        switch = page.targets[("extra-30", "switch")]
+        used = next(f"extra-{n}" for n in range(39, -1, -1)
+                    if n != 35 and on_screen(page.targets[(f"extra-{n}", "switch")]))
+        switch = page.targets[(used, "switch")]
         switch.grab_focus()
         switch.set_active(True)
         settle()
         assert abs(adjustment.get_value() - bottom) < 2, (adjustment.get_value(), bottom)
-        assert window.get_focus() is page.targets[("extra-30", "switch")]
+        assert window.get_focus() is page.targets[(used, "switch")]
         page.targets[("extra-35", "removal")].emit("clicked")
         assert "extra-35" not in page.staged
         page.discard()
