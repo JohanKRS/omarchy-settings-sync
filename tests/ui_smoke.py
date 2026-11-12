@@ -923,7 +923,8 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             window.new_button.emit("clicked")
             assert window.pages.get_visible_child_name() == "chat" and window.chat_tab.get_active(), name
             assert not window.messages and window.content.get_visible_child_name() == "empty", name
-            assert window.setup_panel not in window.panels and window.input.has_focus(), name
+            # The fixture never takes the keyboard, so the window stays inactive: check the focus widget.
+            assert window.setup_panel not in window.panels and window.get_focus() is window.input, name
         # Opening a conversation from history does the same.
         window.show_page("features")
         wait(lambda: not page.loading)
