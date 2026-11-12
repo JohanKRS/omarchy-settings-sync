@@ -8,9 +8,10 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'plugin'))
-from applier import Applier, Ledger, delegation, orphans, removal, status
+from applier import Applier, Ledger, delegation, needs_agent, orphans, removal, status
 from features import (Probe, desired, expand, install_id, list_machines, load_catalog, load_machine,
-                      machine_path, machine_text, ordered, part_enabled, remove_machine, rename_machine)
+                      machine_path, machine_text, ordered, overlaps, part_enabled, remove_feature, remove_machine,
+                      rename_machine, saved_list)
 
 CATALOG = '''
 version = 1
@@ -407,9 +408,128 @@ package = "bad name"
         orphan_lock = orphans(Ledger(self.state / 'applied.json'), [])
         self.applier.finish([self.applier.disable(next(f for f in orphan_lock if f.id == 'lock-shortcut'))])
         self.assertNotIn('settings-sync', self.config('hypr/bindings.lua').read_text() if self.config('hypr/bindings.lua').exists() else '')
-        text = removal(self.by_id['idle'], self.applier.disable(self.by_id['idle']), self.state / 'r.json', machine='desk')
+        text = removal([(self.by_id['idle'], None)], [self.applier.disable(self.by_id['idle'])],
+                       self.state / 'r.json', machine='desk')
         self.assertIn('REMOVER PERSONALIZAÇÃO DO REPOSITÓRIO', text)
+        self.assertIn('Não faça perguntas', text)
         self.assertIn('idle', text)
+
+    def git(self, *args):
+        subprocess.run(['git', '-C', str(self.repo), *args], check=True, capture_output=True)
+
+    def test_removing_a_feature_edits_only_its_own_entries(self):
+        catalog = (self.repo / 'features.toml')
+        catalog.write_text(catalog.read_text().replace('[[feature]]\nid = "idle"', '# Idle timers\n[[feature]]\nid = "idle"'))
+        (self.repo / 'machines').mkdir()
+        machine_path(self.repo, 'desk').write_text(
+            '# Choices\nname = "desk"\n\n[features]\n"idle" = "on"\n"lock-shortcut" = "on"\n"popups" = "off"\n'
+            '\n[parts]\n"popups.profile" = "off"\n')
+        machine_path(self.repo, 'laptop').write_text('name = "laptop"\n\n[features]\n"idle" = "on"\n')
+        (self.repo / 'install.sh').write_text('cp system/sleep.conf /etc\n')
+        (self.repo / 'desktop/lock-test.sh').write_text('test lock\n')
+        (self.repo / 'SYNC.md').write_text('| desktop/lock.lua | bindings |\n| desktop/popups.lua | popups |\n'
+                                           'The lock-shortcut feature binds Super+L.\n')
+        self.git('init', '-q')
+        self.git('add', '.')
+        before = catalog.read_text()
+        result = remove_feature(self.repo, self.by_id['lock-shortcut'])
+        self.assertIsNotNone(result)
+        after = catalog.read_text()
+        self.assertNotIn('lock-shortcut', after)
+        self.assertNotIn('desktop/lock.lua', after)
+        self.assertIn('requires = []', after)  # popups no longer requires it
+        self.assertIn('# Idle timers\n[[feature]]\nid = "idle"', after)  # neighbours keep their comments
+        self.assertEqual(before.split('[[feature]]\nid = "pdf"')[1], after.split('[[feature]]\nid = "pdf"')[1])
+        features, errors = load_catalog(self.repo)
+        self.assertEqual((errors, [f.id for f in features]), ([], ['idle', 'popups', 'pdf', 'no-sleep']))
+        self.assertFalse((self.repo / 'desktop/lock.lua').exists())
+        self.assertEqual(result.deleted, ['desktop/lock.lua'])
+        desk = machine_path(self.repo, 'desk').read_text()
+        self.assertNotIn('lock-shortcut', desk)
+        self.assertIn('# Choices', desk)
+        self.assertIn('"popups.profile" = "off"', desk)
+        self.assertNotIn(machine_path(self.repo, 'laptop'), result.paths)  # never chose it
+        self.assertEqual([m.split(':')[:2] for m in result.mentions], [['SYNC.md', '1'], ['SYNC.md', '3']])
+        self.assertEqual(result.leftovers, [])  # desktop/ still holds sources of other features
+        # Sources another file still names, and sources other features use, stay.
+        result = remove_feature(self.repo, self.by_id['no-sleep'])
+        self.assertTrue((self.repo / 'system/sleep.conf').exists())
+        self.assertEqual(result.deleted, [])
+        result = remove_feature(self.repo, self.by_id['popups'])
+        self.assertFalse((self.repo / 'desktop/popups.lua').exists())
+        # Its instructions README is documentation: the agent decides, the plugin keeps it.
+        self.assertTrue((self.repo / 'apps/firefox/README.md').exists())
+        self.assertEqual(result.leftovers, ['apps/firefox/README.md', 'desktop/lock-test.sh'])
+        self.assertEqual([f.id for f in load_catalog(self.repo)[0]], ['idle', 'pdf'])
+
+    def test_removing_programs_and_falling_back_to_the_agent(self):
+        catalog = self.repo / 'features.toml'
+        catalog.write_text(CATALOG + '\n[[program]]\npackage = "papers"\n\n[[program]]\npackage = "zed"\n')
+        features = {f.id: f for f in load_catalog(self.repo)[0]}
+        self.git('init', '-q')
+        result = remove_feature(self.repo, features['program-papers'])
+        self.assertIsNotNone(result)
+        self.assertEqual([f.id for f in load_catalog(self.repo)[0] if f.program], ['program-zed'])
+        # Instructions written as text are not file names.
+        catalog.write_text(CATALOG.replace('instructions = "apps/firefox/README.md"',
+                                           'instructions = "Run `omarchy plugin enable x` and check the bar."'))
+        self.assertIsNotNone(remove_feature(self.repo, load_catalog(self.repo)[0][2]))
+        # A layout the plugin cannot follow is left untouched for the agent.
+        odd = 'feature = [{ id = "x", title = "X", part = [{ kind = "agent", title = "A", instructions = "B" }] }]\n'
+        catalog.write_text(odd)
+        feature = load_catalog(self.repo)[0][0]
+        self.assertIsNone(remove_feature(self.repo, feature))
+        self.assertEqual(catalog.read_text(), odd)
+        text = removal([(feature, None)], [], self.state / 'r.json', machine='desk')
+        self.assertIn('remova a entrada de features.toml', text)
+        self.assertTrue(needs_agent(feature, None, []))
+
+    def test_removal_request_lists_only_what_is_left(self):
+        (self.repo / 'SYNC.md').write_text('desktop/lock.lua goes to bindings.lua\n')
+        self.git('init', '-q')
+        self.git('add', '.')
+        feature = self.by_id['lock-shortcut']
+        done = remove_feature(self.repo, feature)
+        self.assertTrue(needs_agent(feature, done, []))
+        text = removal([(feature, done)], [], self.state / 'r.json', machine='desk')
+        self.assertIn('já tirou a entrada', text)
+        self.assertIn('SYNC.md:1: desktop/lock.lua goes to bindings.lua', text)
+        self.assertNotIn('Ainda falta desfazer', text)
+        (self.repo / 'SYNC.md').write_text('Nothing about it.\n')
+        quiet = remove_feature(self.repo, self.by_id['idle'])
+        self.assertFalse(needs_agent(self.by_id['idle'], quiet, []))
+        self.assertTrue(needs_agent(self.by_id['idle'], quiet, [], problem='rejected'))
+
+    def test_overlapping_features_are_reported_and_extensions_are_not(self):
+        catalog = self.repo / 'features.toml'
+        catalog.write_text(CATALOG + '''
+[[feature]]
+id = "idle-again"
+title = "Screensaver after 2 minutes"
+[[feature.part]]
+kind = "json"
+dest = "~/.config/omarchy/shell.json"
+values = { "idle.screensaver" = 120 }
+
+[[feature]]
+id = "lock-extra"
+title = "Another binding"
+[[feature.part]]
+kind = "block"
+dest = "~/.config/hypr/bindings.lua"
+text = "bind(SUPER, K, kill)"
+''')
+        features, errors = load_catalog(self.repo)
+        self.assertEqual(errors, [])
+        problems = overlaps(features)
+        self.assertEqual(len(problems), 1)
+        self.assertIn('idle-again and idle', problems[0])
+        self.assertIn('idle.screensaver', problems[0])
+        self.assertEqual(overlaps(self.features), [])
+        listed = saved_list(features)
+        self.assertIn('- idle: Screensaver after 5 minutes (desktop, ~/.config/omarchy/shell.json)', listed)
+        self.assertIn('popups', listed)
+        self.assertIn('opções: profile', listed)
 
     def test_disabled_optional_part_is_skipped(self):
         machine = {'parts': {'popups.profile': 'off'}}

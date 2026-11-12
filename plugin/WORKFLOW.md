@@ -140,6 +140,18 @@ simple parts itself and sends you only what needs judgment or a conflict.
   (`package:`, `command:`, `path:`, `omarchy>=4.1`, `!` negates) and `requires`.
   When creating a feature, ask with the question tool whether other machines
   should turn it on, ask first, or skip it.
+- **Extend, never duplicate.** Before adding a feature or program, read the
+  catalog (and the local catalog); the request lists what is already saved.
+  When the request changes, extends or adds options to something already
+  there (the same behavior, app setting, file, keys or package), edit that
+  entry instead of creating another switch: change its values, add parts
+  (optional parts with an `id` for choices the user may want separately), and
+  update its title and summary to cover everything it now does. Keep its `id`
+  so every machine's choice still applies; machines that have it on receive
+  the new parts at their next Sync. Do not ask again about other machines.
+  Create a feature only for a behavior no entry covers, and say in your reply
+  which entry you edited. Validation rejects two features that change the
+  same file, line or key.
 - **Parts say what changes.** Prefer kinds the plugin applies and reverts
   itself: `file` (whole file), `line`, `block` (a snippet the plugin wraps in
   `>>> settings-sync <feature>/<part> >>>` markers; an existing identical
@@ -179,10 +191,12 @@ simple parts itself and sends you only what needs judgment or a conflict.
 - **Delegated work.** A request titled "APLICAR CONFIGURAÇÕES DO CATÁLOGO" lists
   only the parts left for you. Apply or revert those, resolve listed conflicts
   without discarding local edits, then write the result file it names.
-- **Removing a customization.** A request titled "REMOVER PERSONALIZAÇÃO DO
-  REPOSITÓRIO" authorizes deleting that feature everywhere: its catalog entry,
-  source files used only by it, its documentation and machine entries. The
-  plugin already undid it locally and undoes it on other machines at Sync.
+- **Removing a customization.** The plugin removes it itself: it undoes it
+  here, deletes the catalog entry, its machine choices and the source files
+  only it used, and publishes. A request titled "REMOVER PERSONALIZAÇÃO DO
+  REPOSITÓRIO" lists only what is left, such as mentions in README/SYNC.md or
+  files beside its sources, and authorizes publishing that. The user already
+  confirmed: do not ask questions, do not recreate it, change nothing else.
 - **After an Omarchy update.** A request titled "AJUSTAR APÓS ATUALIZAÇÃO DO
   OMARCHY" includes the changed defaults for one customization. Explain briefly
   what changed, adapt the customization only as much as needed, validate, and

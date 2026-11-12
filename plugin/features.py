@@ -312,6 +312,284 @@ def has_catalog(repository):
     return bool(repository) and (Path(repository) / CATALOG).is_file()
 
 
+def _writes(feature):
+    """What each part of a feature claims at its destination, as comparable keys."""
+    for part in feature.parts:
+        data, dest = part.data, str(part.data.get("dest", ""))
+        if part.kind in ("file", "system-file"):
+            yield (dest,), dest
+        elif part.kind == "line":
+            yield (dest, "line", data["text"]), f"{dest}: {data['text']}"
+        elif part.kind == "block":
+            yield (dest, "block", data.get("source") or data.get("text")), f"{dest}: {part.title}"
+        elif part.kind == "json":
+            for key in data["values"]:
+                yield (dest, key), f"{dest}: {key}"
+        elif part.kind == "ini":
+            for key in data["values"]:
+                yield (dest, data["section"], key), f"{dest} [{data['section']}] {key}"
+        elif part.kind == "mime":
+            for kind in data["types"]:
+                yield ("mime", kind), f"MIME {kind}"
+        elif part.kind == "user-service":
+            yield ("unit", data["unit"]), data["unit"]
+
+
+def overlaps(features):
+    """Features that write the same file, line or key: one setting split across two switches."""
+    owners, problems = {}, []
+    for feature in features:
+        for key, label in _writes(feature):
+            other = owners.setdefault(key, feature.id)
+            if other != feature.id:
+                problems.append(f"{feature.id} and {other} both change {label}; keep a single feature "
+                                f"(add the new parts to {other}) instead of two switches")
+    return sorted(set(problems))
+
+
+def saved_list(features, limit=150):
+    """One line per saved customization, so a request can extend it instead of adding a twin."""
+    lines = []
+    for feature in features[:limit]:
+        if feature.program:
+            names = [name for part in feature.parts for name in part.data.get("install", []) + part.data.get("remove", [])]
+            where = f"programa: {'instalar' if feature.program == 'install' else 'remover'} {' '.join(names) or feature.title}"
+        else:
+            targets = sorted({str(part.data.get("dest") or part.data.get("unit") or "") for part in feature.parts} - {""})
+            where = ", ".join([feature.app or feature.group] + targets[:4] + (["…"] if len(targets) > 4 else []))
+        optional = [str(part.data["id"]) for part in feature.parts if part.optional]
+        lines.append(f"- {feature.id}: {feature.title} ({where})" + (" · local" if feature.local else "")
+                     + (f" · opções: {', '.join(optional)}" if optional else ""))
+    if len(features) > limit:
+        lines.append(f"- … e mais {len(features) - limit} em {CATALOG}")
+    return "\n".join(lines)
+
+
+# Removing a customization ---------------------------------------------------
+ENTRY = re.compile(r"\s*\[\[\s*(feature|program)\s*\]\]\s*(?:#.*)?$")
+SUBTABLE = re.compile(r"\s*\[\[?\s*(feature|program)\s*\.")
+TABLE = re.compile(r"\s*\[")
+TEXT_LIMIT = 512 * 1024
+
+
+@dataclass
+class Removal:
+    """What the plugin removed from the repository, and what it left for the agent."""
+    paths: list = field(default_factory=list)  # Changed or deleted, to publish
+    deleted: list = field(default_factory=list)  # Relative paths of deleted source files
+    mentions: list = field(default_factory=list)  # "file:line: text" in the documentation
+    leftovers: list = field(default_factory=list)  # Other files left in a removed component's folder
+
+
+def _attached(lines, index):
+    """Start of the comment lines written right above a table header."""
+    while index > 0 and lines[index - 1].lstrip().startswith("#"):
+        index -= 1
+    return index
+
+
+def _spans(lines):
+    """[kind, start, end] of every [[feature]] and [[program]] entry, comments above it included."""
+    headers = []
+    for index, line in enumerate(lines):
+        if not TABLE.match(line) or SUBTABLE.match(line):
+            continue
+        match = ENTRY.match(line)
+        headers.append((index, match.group(1) if match else None))
+    spans = []
+    for position, (index, kind) in enumerate(headers):
+        if kind:
+            following = headers[position + 1][0] if position + 1 < len(headers) else None
+            spans.append([kind, _attached(lines, index), len(lines) if following is None else _attached(lines, following)])
+    return spans
+
+
+def _entry_id(kind, entry):
+    if kind == "program":
+        return str(entry.get("id") or f"program-{entry.get('package', '')}")
+    return str(entry.get("id", ""))
+
+
+def _references(entries):
+    """Repository files that catalog entries read: sources and instruction files."""
+    found = set()
+    for entry in entries:
+        for item in [entry] + [part for part in entry.get("part", []) if isinstance(part, dict)]:
+            for value in (item.get("source"), str(item.get("instructions", "")).split("#", 1)[0].strip()):
+                # Instructions are a README path or plain text; only a path names a file.
+                if value and len(str(value)) < 256 and not re.search(r"\s", str(value)) and not Path(str(value)).is_absolute():
+                    found.add(os.path.normpath(str(value)))
+    return found
+
+
+def _without_requirement(line, identifier):
+    match = re.fullmatch(r"(\s*requires\s*=\s*\[)([^\]]*)(\].*)", line.rstrip("\n"))
+    if not match:
+        return line
+    items = [item.strip() for item in match.group(2).split(",") if item.strip()]
+    kept = [item for item in items if item.strip("\"'") != identifier]
+    if kept == items:
+        return line
+    return match.group(1) + ", ".join(kept) + match.group(3) + ("\n" if line.endswith("\n") else "")
+
+
+def _drop_entry(text, kind, identifier):
+    """The catalog text without one entry and without it in other entries' requires.
+
+    Returns None unless the result parses to exactly the expected catalog, so a
+    layout this cannot follow is left to the agent instead of being damaged.
+    """
+    try:
+        document = tomllib.loads(text)
+    except ValueError:
+        return None
+    entries = document.get(kind, [])
+    matches = [index for index, entry in enumerate(entries) if _entry_id(kind, entry) == identifier]
+    lines = text.splitlines(keepends=True)
+    spans = [span for span in _spans(lines) if span[0] == kind]
+    if len(matches) != 1 or len(spans) != len(entries):
+        return None
+    _, start, end = spans[matches[0]]
+    if start > 0 and not lines[start - 1].strip() and (end >= len(lines) or not lines[end].strip()):
+        start -= 1  # Do not leave two blank lines where the entry was.
+    lines = lines[:start] + lines[end:]
+    if kind == "feature":
+        for _, first, last in _spans(lines):
+            for index in range(first, last):
+                lines[index] = _without_requirement(lines[index], identifier)
+    expected = dict(document)
+    expected[kind] = [entry for index, entry in enumerate(entries) if index != matches[0]]
+    expected["feature"] = [dict(entry, requires=[item for item in entry["requires"] if item != identifier])
+                           if identifier in entry.get("requires", []) else entry for entry in expected.get("feature", [])]
+    result = "".join(lines)
+    try:
+        parsed = tomllib.loads(result)
+    except ValueError:
+        return None
+    normal = lambda value: {key: item for key, item in value.items() if item != [] or key not in ("feature", "program")}
+    return result if normal(parsed) == normal(expected) else None
+
+
+def _choice_of(table, key, identifier):
+    """Whether a key of a machine file's table belongs to one feature."""
+    return key.startswith(identifier + ".") if table == "parts" else key == identifier
+
+
+def _drop_choices(text, identifier):
+    """A machine file without its choices for one feature; None when nothing changes or it cannot."""
+    table, kept, dropped = None, [], False
+    for line in text.splitlines(keepends=True):
+        header = re.fullmatch(r"\s*\[([A-Za-z0-9_-]+)\]\s*(#.*)?", line.rstrip("\n"))
+        if header:
+            table = header.group(1)
+        key = re.match(r'\s*("(?:[^"\\]|\\.)*"|[A-Za-z0-9_-]+)\s*=', line)
+        if key and table in ("features", "off", "parts"):
+            name = json.loads(key.group(1)) if key.group(1).startswith('"') else key.group(1)
+            if _choice_of(table, name, identifier):
+                dropped = True
+                continue
+        kept.append(line)
+    if not dropped:
+        return None
+    result = "".join(kept)
+    try:
+        before, after = tomllib.loads(text), tomllib.loads(result)
+    except ValueError:
+        return None
+    for table in ("features", "off", "parts"):
+        values = before.get(table)
+        if isinstance(values, dict):
+            before[table] = {key: value for key, value in values.items() if not _choice_of(table, key, identifier)}
+    return result if before == after else None
+
+
+def _tracked(repository):
+    try:
+        output = subprocess.run(["git", "-C", str(repository), "ls-files", "-z"], capture_output=True,
+                                timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [name for name in output.decode(errors="replace").split("\0") if name]
+
+
+def _text(path):
+    try:
+        if path.stat().st_size > TEXT_LIMIT:
+            return None
+        return path.read_text()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def remove_feature(repository, feature, local_catalog=None):
+    """Delete a customization from the catalog, machine files and its own source files.
+
+    Returns a Removal, or None when the catalog's layout needs the agent. Text
+    that only people read (README, SYNC.md) is reported in `mentions`, not edited.
+    """
+    local = feature.local and local_catalog
+    catalog = Path(local_catalog) if local else Path(repository) / CATALOG
+    base = catalog.parent
+    kind = "program" if feature.program else "feature"
+    try:
+        text = catalog.read_text()
+        document = tomllib.loads(text)
+    except (OSError, ValueError):
+        return None
+    result = _drop_entry(text, kind, feature.id)
+    if result is None:
+        return None
+    entries = document.get(kind, [])
+    removed = [entry for entry in entries if _entry_id(kind, entry) == feature.id]
+    remaining = [entry for entry in document.get("feature", []) + document.get("program", []) if entry not in removed]
+    removal = Removal(paths=[catalog])
+    catalog.write_text(result)
+    tracked = [] if local else _tracked(base)
+    if not local:
+        for path in sorted((base / MACHINES).glob("*.toml")):
+            changed = _drop_choices(_text(path) or "", feature.id)
+            if changed is not None:
+                path.write_text(changed)
+                removal.paths.append(path)
+    # Source files only this customization read go too, unless another file still names them.
+    still_used = _references(remaining)
+    others = [name for name in tracked if name != CATALOG and not name.endswith(".md")
+              and not name.startswith(MACHINES + "/")]
+    for reference in sorted(_references(removed) - still_used):
+        path = base / reference
+        try:
+            if (".." in Path(reference).parts or path.is_symlink() or not path.is_file()
+                    or not inside(path.resolve(), base.resolve())):
+                continue
+        except OSError:
+            continue
+        if reference.endswith(".md"):
+            removal.leftovers.append(reference)  # Documentation is for the agent to judge.
+            continue
+        if any(reference in (_text(base / name) or "") for name in others if name != reference):
+            continue
+        # Only files the repository tracks, or this machine's own local/ sources.
+        if not (reference.startswith("local/") if local else reference in tracked):
+            continue
+        path.unlink()
+        removal.paths.append(path)
+        removal.deleted.append(reference)
+    # What the plugin cannot judge: documentation and helpers beside the deleted sources.
+    folders = {os.path.dirname(name) for name in removal.deleted} - {""}
+    for folder in sorted(folders):
+        if any(reference.startswith(folder + "/") for reference in still_used):
+            continue
+        removal.leftovers += [name for name in tracked if name.startswith(folder + "/") and (base / name).is_file()
+                              and name not in removal.leftovers]
+    words = ([feature.title] if len(feature.title) >= 6 else []) + removal.deleted
+    named = re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(feature.id)}(?![A-Za-z0-9_-])")
+    for name in [name for name in tracked if name.endswith(".md")]:
+        for number, line in enumerate((_text(base / name) or "").splitlines(), 1):
+            if named.search(line) or any(word.casefold() in line.casefold() for word in words):
+                removal.mentions.append(f"{name}:{number}: {line.strip()[:160]}")
+    return removal
+
+
 class Probe:
     """Evaluate `when` conditions once per refresh."""
     def __init__(self, run=subprocess.run):
@@ -508,6 +786,7 @@ def main(arguments):
     features, errors = load_catalog(arguments[1])
     if not has_catalog(arguments[1]):
         errors.append(f"{CATALOG} not found")
+    errors += overlaps(features)
     for error in errors:
         print(error, file=sys.stderr)
     if not errors:

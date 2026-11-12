@@ -17,14 +17,18 @@ from core import private_write, read_json
 import release
 from features import (GROUPS, Probe, dependents, desired, has_catalog, install_id, list_machines, load_catalog,
                       load_machine, machine_name, machine_path, machine_text, off_mode, ordered, part_enabled,
-                      remove_machine, rename_machine, valid_machine)
+                      remove_feature, remove_machine, rename_machine, valid_machine)
 from i18n import tr
 
 FILTERS = ("all", "on", "off", "new", "pending", "modified", "release", "unavailable")
 FILTER_LABELS = {"all": "All", "on": "On", "off": "Off", "new": "New", "pending": "Pending", "release": "Changed by Omarchy",
                  "modified": "Edited locally", "unavailable": "Not applicable"}
 STATUS_LABELS = {"applied": "Applied", "pending": "Pending", "modified": "Edited locally", "off": "Off",
-                 "new": "New", "unavailable": "Not applicable"}
+                 "new": "New", "unavailable": "Not applicable", "staged": "Changed", "remove": "Will be removed"}
+OFF_CHOICES = (("default", "Return to the Omarchy default"), ("keep", "Keep it as it is"),
+               ("previous", "Restore the earlier backup"))
+HERE = {"default": "Here it returns to the Omarchy default.", "keep": "Here it stays as it is.",
+        "previous": "Here it returns to the earlier backup."}
 GROUP_LABELS = {"desktop": "Desktop", "apps": "Apps", "system": "System", "programs": "Programs"}
 AREA_LABELS = {"hyprland": "Hyprland", "firefox": "Firefox", "shell": "Shell", "voxtype": "Voxtype", "mime": "MIME",
                "gtk": "GTK", "nautilus": "Nautilus", "steam": "Steam", "whatsapp": "WhatsApp", "papers": "Papers",
@@ -129,7 +133,8 @@ def collect(window, *, fetch=False):
     snapshot.ledger = Ledger(state_dir(window) / "applied.json")
     applier = make_applier(window, path, snapshot.ledger)
     if results_path(window).exists():
-        applier.merge_agent_results(results_path(window), snapshot.features)
+        # Removed customizations the agent finished undoing are only in the ledger by now.
+        applier.merge_agent_results(results_path(window), snapshot.features + orphans(snapshot.ledger, snapshot.features))
     snapshot.orphans = orphans(snapshot.ledger, snapshot.features)
     probe = Probe()
     for feature in snapshot.features:
@@ -221,6 +226,29 @@ def run_changes(window, snapshot, changes):
     return outcomes
 
 
+def remove_from_repository(window, snapshot, features):
+    """Delete customizations from the repository and publish that, in one commit.
+
+    Returns {"entries": [(feature, Removal or None)], "problem": text or None};
+    None means the catalog needs the agent for that customization.
+    """
+    entries, paths = [], []
+    for feature in features:
+        try:
+            removal = remove_feature(snapshot.checkout, feature, local_catalog(window))
+        except OSError:
+            removal = None
+        entries.append((feature, removal))
+        if removal and not feature.local:
+            paths += [path for path in removal.paths if path not in paths]
+    problem = None
+    if paths:
+        names = ", ".join(feature.id for feature, removal in entries if removal and not feature.local)
+        problem = checkout.publish(snapshot.checkout, window.settings.get("branch", ""), paths,
+                                   f"Remove customization{'s' if ',' in names else ''} {names}")
+    return {"entries": entries, "problem": problem}
+
+
 def save_machine(window, snapshot, publish):
     """Write this machine's choices; publish them when publishing is enabled."""
     path = machine_path(snapshot.checkout, snapshot.machine_name)
@@ -307,9 +335,9 @@ class FeaturesPage(Gtk.Box):
         main.append(self.release_notice)
         self.listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.listing.set_margin_end(10)  # Keep text clear of the overlay scrollbar.
-        scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
-        scroll.set_child(self.listing)
-        main.append(scroll)
+        self.scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.scroll.set_child(self.listing)
+        main.append(self.scroll)
         # The tab's action bar: Sync when nothing is staged, Apply when it is.
         self.bar = Gtk.Box(spacing=8, visible=False)
         self.bar.add_css_class("pending-bar")
@@ -354,7 +382,9 @@ class FeaturesPage(Gtk.Box):
         self.append(self.views)
         self.banner_mode = None
         self.controls = []
-        self.removing = None
+        self.targets = {}  # (feature id, role) -> widget, to give focus back after a render
+        self.view = None
+        self.position = 0
         self.fetched = 0
 
     def sync_sensitivity(self):
@@ -431,10 +461,57 @@ class FeaturesPage(Gtk.Box):
         staged = self.staged.get(feature.id, {})
         return staged.get("state") or desired(feature, self.snapshot.machine)
 
+    def release_focus(self):
+        """Take focus off a row about to be rebuilt; return what it was on.
+
+        When a focused widget is destroyed, GTK focuses the first row of the list
+        instead, and the list scrolls to the top with it.
+        """
+        root = self.get_root()
+        focus = root.get_focus() if root else None
+        if not focus or not focus.is_ancestor(self.listing):
+            return None
+        key = next((key for key, widget in self.targets.items() if widget is focus or focus.is_ancestor(widget)), None)
+        root.set_focus(None)
+        return key
+
+    def keep_position(self, focus):
+        """Hold the scroll position through the next layout, then give focus back to the same control."""
+        adjustment = self.scroll.get_vadjustment()
+        pending = [None]
+        def restore():
+            pending[0] = None
+            adjustment.set_value(min(self.position, max(0, adjustment.get_upper() - adjustment.get_page_size())))
+            return GLib.SOURCE_REMOVE
+        def changed(*_):
+            # GtkViewport is still allocating its child when the range changes; adjust afterwards.
+            if pending[0] is None:
+                pending[0] = GLib.idle_add(restore)
+        restore()
+        handler = adjustment.connect("changed", changed)
+        frames = [0]
+        def settle(_widget, _clock):
+            frames[0] += 1
+            if frames[0] < 2:
+                return GLib.SOURCE_CONTINUE  # The first frame lays out the new rows.
+            adjustment.disconnect(handler)
+            restore()
+            target = self.targets.get(focus)
+            if target and target.get_mapped() and target.get_sensitive():
+                target.grab_focus()
+            return GLib.SOURCE_REMOVE
+        self.scroll.add_tick_callback(settle)
+
     def render(self):
+        view = (self.search.get_text(), self.filter.get_selected())
+        # A new search or filter starts at the top; anything else keeps the place in the list.
+        self.position = self.scroll.get_vadjustment().get_value() if view == self.view else 0
+        self.view = view
+        focus = self.release_focus()
         while self.listing.get_first_child():
             self.listing.remove(self.listing.get_first_child())
         self.controls = []
+        self.targets = {}
         snapshot = self.snapshot
         if not snapshot:
             return
@@ -509,7 +586,16 @@ class FeaturesPage(Gtk.Box):
             empty = Gtk.Label(label=tr('No customizations match.'), xalign=0)
             empty.add_css_class("muted")
             self.listing.append(empty)
+        self.keep_position(focus)
         self.update_bar()
+
+    def removing(self, feature):
+        return bool(self.staged.get(feature.id, {}).get("remove"))
+
+    def shown_status(self, feature, label):
+        if self.removing(feature):
+            return "remove"
+        return "staged" if feature.id in self.staged else label
 
     def row(self, feature):
         snapshot = self.snapshot
@@ -519,6 +605,8 @@ class FeaturesPage(Gtk.Box):
         frame.add_css_class("feature-row")
         if open_:
             frame.add_css_class("expanded")
+        if self.removing(feature):
+            frame.add_css_class("removing")
         if label == "unavailable":
             frame.add_css_class("unavailable")
         head = Gtk.Box(spacing=10)
@@ -553,11 +641,13 @@ class FeaturesPage(Gtk.Box):
             subtitle.add_css_class("feature-subtitle")
             texts.append(subtitle)
         head.append(texts)
-        head.append(self.status_widget("staged" if feature.id in self.staged else label))
+        head.append(self.status_widget(self.shown_status(feature, label)))
         switch = Gtk.Switch(valign=Gtk.Align.CENTER, active=self.effective(feature) == "on")
-        switch.set_sensitive(label != "unavailable" and not self.window.busy)
-        if label != "unavailable":
+        usable = label != "unavailable" and not self.removing(feature)
+        switch.set_sensitive(usable and not self.window.busy)
+        if usable:
             self.controls.append(switch)
+        self.targets[(feature.id, "switch")] = switch
         switch.update_property([Gtk.AccessibleProperty.LABEL], [feature.title])
         switch.connect("notify::active", lambda widget, _: self.toggled(feature, widget.get_active()))
         head.append(switch)
@@ -599,11 +689,12 @@ class FeaturesPage(Gtk.Box):
         subtitle.add_css_class("program-" + feature.program)
         texts.append(subtitle)
         frame.append(texts)
-        frame.append(self.status_widget("staged" if feature.id in self.staged else label))
+        frame.append(self.status_widget(self.shown_status(feature, label)))
         switch = Gtk.Switch(valign=Gtk.Align.CENTER, active=self.effective(feature) == "on")
         switch.set_sensitive(label != "unavailable" and not self.window.busy)
         if label != "unavailable":
             self.controls.append(switch)
+        self.targets[(feature.id, "switch")] = switch
         switch.update_property([Gtk.AccessibleProperty.LABEL], [f"{action} {feature.title}"])
         switch.connect("notify::active", lambda widget, _: self.toggled(feature, widget.get_active()))
         frame.append(switch)
@@ -679,7 +770,7 @@ class FeaturesPage(Gtk.Box):
         self.render()
 
     def status_widget(self, label):
-        text = tr('Changed') if label == "staged" else tr(STATUS_LABELS[label])
+        text = tr(STATUS_LABELS[label])
         if label == "new":
             pill = Gtk.Label(label=text, valign=Gtk.Align.CENTER)
             pill.add_css_class("feature-pill")
@@ -706,11 +797,12 @@ class FeaturesPage(Gtk.Box):
         impact = snapshot.impact(feature.id)
         if impact:
             content.append(self.release_details(feature, impact))
-        parts = Gtk.Label(label=tr('Parts'), xalign=0)
+        parts = Gtk.Label(label=tr('Parts').upper(), xalign=0)
         parts.add_css_class("feature-section")
         content.append(parts)
         states = snapshot.states.get(feature.id, {})
         staged_parts = self.staged.get(feature.id, {}).get("parts", {})
+        removing = self.removing(feature)
         for part in feature.parts:
             line = Gtk.Box(spacing=8)
             name = Gtk.Label(label=part.title, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE)
@@ -727,27 +819,41 @@ class FeaturesPage(Gtk.Box):
                 key = f"{feature.id}.{part.data['id']}"
                 active = staged_parts.get(key, "on" if part_enabled(feature, part, snapshot.machine) else "off") == "on"
                 toggle = Gtk.Switch(active=active, valign=Gtk.Align.CENTER)
-                toggle.set_sensitive(not self.window.busy)
-                self.controls.append(toggle)
+                toggle.set_sensitive(not self.window.busy and not removing)
+                if not removing:
+                    self.controls.append(toggle)
+                self.targets[(feature.id, "part:" + key)] = toggle
                 toggle.connect("notify::active", lambda widget, _, k=key: self.part_toggled(feature, k, widget.get_active()))
                 line.append(toggle)
             content.append(line)
-        off = Gtk.Label(label=tr('When turned off on this machine'), xalign=0)
-        off.add_css_class("feature-section")
-        content.append(off)
+        # What turning it off (or removing it) does on this machine: one choice, not a list of options.
         current = self.staged.get(feature.id, {}).get("mode", off_mode(feature, snapshot.machine))
-        group = None
-        for mode, text in (("default", tr('Remove and return to the Omarchy default')),
-                           ("keep", tr('Stop syncing and keep it as it is')),
-                           ("previous", tr('Restore how it was before (backup)'))):
-            option = Gtk.CheckButton(label=text, active=current == mode)
-            if group:
-                option.set_group(group)
-            group = group or option
-            option.set_sensitive(not self.window.busy)
-            self.controls.append(option)
-            option.connect("toggled", lambda widget, m=mode: widget.get_active() and self.mode_changed(feature, m))
-            content.append(option)
+        modes = [mode for mode, _ in OFF_CHOICES]
+        off = Gtk.Box(spacing=8, margin_top=4)
+        caption = Gtk.Label(label=tr('When turned off here'), xalign=0, hexpand=True, wrap=True)
+        caption.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        caption.add_css_class("feature-subtitle")
+        off.append(caption)
+        choice = Gtk.DropDown.new_from_strings([tr(text) for _, text in OFF_CHOICES])
+        choice.set_selected(modes.index(current) if current in modes else 0)
+        choice.set_valign(Gtk.Align.CENTER)
+        choice.update_property([Gtk.AccessibleProperty.LABEL], [tr('When turned off here')])
+        choice.set_sensitive(not self.window.busy)
+        self.controls.append(choice)
+        self.targets[(feature.id, "mode")] = choice
+        choice.connect("notify::selected", lambda widget, _: self.mode_changed(feature, modes[widget.get_selected()]))
+        off.append(choice)
+        content.append(off)
+        if removing:
+            text = tr('Leaves the repository when you apply; other machines undo it on their next Sync.')
+            text += " " + tr(HERE[current])
+            others = [f.title for f in dependents(snapshot.features, feature.id)]
+            if others:
+                text += " " + tr('Also used by: {names}.', names=", ".join(others))
+            note = Gtk.Label(label=text, xalign=0, wrap=True)
+            note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            note.add_css_class("feature-subtitle")
+            content.append(note)
         actions = Gtk.Box(spacing=4)
         actions.add_css_class("feature-actions")
         talk = Gtk.Button(label=tr('Ask the agent'))
@@ -755,48 +861,31 @@ class FeaturesPage(Gtk.Box):
         talk.add_css_class("link-action")
         talk.set_tooltip_text(tr('Talk about this customization'))
         talk.connect("clicked", lambda *_: self.window.discuss_feature(feature))
+        self.targets[(feature.id, "agent")] = talk
         actions.append(talk)
-        if self.removing != feature.id:
+        if removing:
+            remove = Gtk.Button(label=tr('Keep in the repository'))
+            remove.add_css_class("flat")
+            remove.add_css_class("link-action")
+            remove.connect("clicked", lambda *_: self.stage_removal(feature, False))
+        else:
             remove = Gtk.Button(label=tr('Remove from repository'))
             remove.add_css_class("flat")
             remove.add_css_class("destructive")
-            remove.set_sensitive(not self.window.busy)
-            self.controls.append(remove)
-            remove.connect("clicked", lambda *_: self.ask_removal(feature))
-            actions.append(remove)
+            remove.set_tooltip_text(tr('Delete it from every machine when you apply'))
+            remove.connect("clicked", lambda *_: self.stage_removal(feature))
+        remove.set_sensitive(not self.window.busy)
+        self.controls.append(remove)
+        self.targets[(feature.id, "removal")] = remove
+        actions.append(remove)
         content.append(actions)
-        if self.removing == feature.id:
-            others = [f.title for f in dependents(snapshot.features, feature.id)]
-            text = tr('Remove “{title}” from every machine? It is undone here now, deleted from the repository, and other machines undo it on their next Sync.',
-                      title=feature.title)
-            if others:
-                text += " " + tr('Also used by: {names}.', names=", ".join(others))
-            question = Gtk.Label(label=text, xalign=0, wrap=True)
-            question.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            content.append(question)
-            confirm = Gtk.Box(spacing=6)
-            yes = Gtk.Button(label=tr('Remove everywhere'))
-            yes.add_css_class("destructive")
-            yes.set_sensitive(not self.window.busy)
-            self.controls.append(yes)
-            yes.connect("clicked", lambda *_: self.remove(feature))
-            confirm.append(yes)
-            cancel = Gtk.Button(label=tr('Cancel'))
-            cancel.add_css_class("flat")
-            cancel.connect("clicked", lambda *_: self.ask_removal(None))
-            confirm.append(cancel)
-            content.append(confirm)
         return content
 
     # Staging ---------------------------------------------------------------
-    def ask_removal(self, feature):
-        self.removing = feature.id if feature else None
-        GLib.idle_add(self.render)
-
-    def remove(self, feature):
-        self.removing = None
-        self.staged.pop(feature.id, None)
-        self.window.remove_feature(self.snapshot, feature)
+    def stage_removal(self, feature, remove=True):
+        """Removing is staged like a switch: Apply deletes it everywhere, Discard keeps it."""
+        self.stage(feature, remove=remove)
+        self.render()
 
     def toggle_details(self, feature):
         self.expanded.symmetric_difference_update({feature.id})
@@ -805,6 +894,8 @@ class FeaturesPage(Gtk.Box):
     def stage(self, feature, **values):
         entry = self.staged.setdefault(feature.id, {})
         entry.update(values)
+        if not entry.get("remove"):
+            entry.pop("remove", None)
         base = desired(feature, self.snapshot.machine)
         if entry.get("state") == base:
             entry.pop("state")
@@ -851,7 +942,10 @@ class FeaturesPage(Gtk.Box):
 
     def mode_changed(self, feature, mode):
         self.stage(feature, mode=mode)
-        self.update_bar()
+        if self.removing(feature):
+            self.render()  # Its note says what happens here.
+        else:
+            self.update_bar()
 
     def discard(self):
         self.staged.clear()
@@ -882,10 +976,13 @@ class FeaturesPage(Gtk.Box):
                 self.sync_button.remove_css_class("suggested-action")
             return
         by_id = {f.id: f for f in snapshot.features}
-        ons = [i for i, e in self.staged.items() if e.get("state") == "on"]
-        offs = [i for i, e in self.staged.items() if e.get("state") == "off"]
-        other = [i for i, e in self.staged.items() if "state" not in e]
+        removes = [i for i, e in self.staged.items() if e.get("remove")]
+        ons = [i for i, e in self.staged.items() if e.get("state") == "on" and i not in removes]
+        offs = [i for i, e in self.staged.items() if e.get("state") == "off" and i not in removes]
+        other = [i for i, e in self.staged.items() if "state" not in e and i not in removes]
         parts = []
+        if removes:
+            parts.append(tr('{count} to remove from the repository', count=len(removes)))
         if ons:
             parts.append(tr('{count} to turn on', count=len(ons)))
         if offs:
@@ -928,7 +1025,11 @@ class FeaturesPage(Gtk.Box):
             return
         snapshot, staged = self.snapshot, dict(self.staged)
         machine = snapshot.machine
+        by_id = {feature.id: feature for feature in snapshot.features}
+        removals = [by_id[i] for i, entry in staged.items() if entry.get("remove") and i in by_id]
         for identifier, entry in staged.items():
+            if entry.get("remove"):
+                continue
             if "state" in entry:
                 machine.setdefault("features", {})[identifier] = entry["state"]
             if "mode" in entry:
@@ -938,26 +1039,40 @@ class FeaturesPage(Gtk.Box):
                     machine.setdefault("off", {})[identifier] = entry["mode"]
             for key, value in entry.get("parts", {}).items():
                 machine.setdefault("parts", {})[key] = value
-        by_id = {feature.id: feature for feature in snapshot.features}
         changes = []
-        for feature in ordered(snapshot.features, [i for i in staged if i in by_id]):
+        kept = [i for i in staged if i in by_id and not staged[i].get("remove")]
+        for feature in ordered(snapshot.features, kept):
             choice = desired(feature, machine)
             mode = off_mode(feature, machine)
             if choice == "on":
                 changes.append((feature, "on", mode))
             elif choice == "off" and snapshot.ledger.applied(feature.id):
                 changes.append((feature, "off", mode))
+        for feature in removals:
+            # Undo only what this machine applied, the way its "when turned off" choice says.
+            mode = staged[feature.id].get("mode", off_mode(feature, machine))
+            for table in ("features", "off"):
+                machine.get(table, {}).pop(feature.id, None)
+            for key in [key for key in machine.get("parts", {}) if key.startswith(feature.id + ".")]:
+                machine["parts"].pop(key)
+            if snapshot.ledger.applied(feature.id):
+                changes.append((feature, "off", mode))
         publish = self.window.publish.get_active()
         self.staged.clear()
         self.loading = True
         self.apply_button.set_sensitive(False)
         self.window.status.set_text(tr('Applying customizations…'))
+        if removals:
+            self.window.status.set_text(tr('Removing from the repository…'))
         def work():
             problem = save_machine(self.window, snapshot, publish)
-            return run_changes(self.window, snapshot, changes), problem
+            outcomes = run_changes(self.window, snapshot, changes)
+            removed = remove_from_repository(self.window, snapshot, removals) if removals else None
+            return outcomes, problem, removed
         def done(result):
             self.loading = False
-            self.window.features_applied(snapshot, *result)
+            outcomes, problem, removed = result
+            self.window.features_applied(snapshot, outcomes, problem, removed=removed)
         def failed(message):
             self.loading = False
             self.window.failure(message)

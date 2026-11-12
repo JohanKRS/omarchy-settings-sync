@@ -35,6 +35,20 @@ class ConfigurationTest(unittest.TestCase):
         create = make_prompt("", repository="sample/new", create=True)
         self.assertIn("PRIVADO", create)
 
+    def test_change_requests_list_saved_customizations_to_extend(self):
+        with tempfile.TemporaryDirectory() as temp:
+            (Path(temp) / 'features.toml').write_text(
+                '[[feature]]\nid = "idle"\ntitle = "Screensaver after 5 minutes"\n[[feature.part]]\nkind = "json"\n'
+                'dest = "~/.config/omarchy/shell.json"\nvalues = { "idle.lock" = 600 }\n')
+            change = make_prompt('Lock after 15 minutes', repository='sample/dotfiles', checkout=Path(temp))
+            self.assertIn('Personalizações já salvas no catálogo', change)
+            self.assertIn('- idle: Screensaver after 5 minutes', change)
+            self.assertIn('Extend, never duplicate', change)
+            sync = make_prompt('Sync', repository='sample/dotfiles', sync=True, checkout=Path(temp))
+            self.assertNotIn('Personalizações já salvas', sync)
+            empty = make_prompt('Lock after 15 minutes', repository='sample/dotfiles', checkout=Path(temp) / 'none')
+            self.assertNotIn('Personalizações já salvas', empty)
+
     def test_existing_customization_review_is_explicit_and_respects_publication(self):
         ordinary = make_prompt('Change my wallpaper', repository='sample/dotfiles')
         self.assertNotIn('REVISAR PERSONALIZAÇÕES ATUAIS', ordinary)
