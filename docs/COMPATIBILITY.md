@@ -43,7 +43,11 @@ are documented architectural differences, not a claim of pixel-identical native
 QML rendering.
 
 The interface remains available for up to 60 seconds after an idle close to
-speed up reopening. Idle agent connections are closed separately. Theme polling
+speed up reopening, except after an update was installed: then an idle close
+ends the process at once so that the next open runs the new code. An update
+started from Settings, or one that makes Omarchy reload the bar widget and
+close the panel, relaunches the panel in the new version when nothing is
+running. Idle agent connections are closed separately. Theme polling
 pauses while hidden; the VTE terminal is initialized only when an external CLI
 is launched. There is no permanent background sync service.
 

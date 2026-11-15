@@ -336,6 +336,25 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             assert finished() == "failed", "A later success must not hide a failure"
             window.present()
         assert finished() == ""
+        # A newer version on disk: closing ends the process at once instead of
+        # keeping the old code warm, and Check now relaunches into Settings.
+        with patch.object(application, "quit") as quit_app, patch("app.installed_version", return_value="99.0.0"):
+            assert window.update_waiting()
+            window.dismiss()
+            quit_app.assert_called_once()
+            quit_app.reset_mock()
+            window.present()
+            with patch.object(window.updater, "check", return_value={}), patch("app.subprocess.Popen") as popen:
+                window.check_updates(force=True, restart=True)
+                wait(lambda: popen.called)
+                command = popen.call_args.args[0]
+                assert command[4].endswith("launch.sh") and command[-1] == "--settings", command
+                quit_app.assert_called_once()
+            window.present()
+        # Closing for the update closed the idle connection; later checks count closes.
+        for closing in window.closing_clients:
+            closing.join()
+        backend.close.reset_mock()
         # Clipboard image signals use synthetic textures, never the user's clipboard.
         texture = Gdk.MemoryTexture.new(320, 180, Gdk.MemoryFormat.R8G8B8A8,
                                        GLib.Bytes.new(bytes([80, 140, 220, 255]) * (320 * 180)), 320 * 4)

@@ -278,10 +278,12 @@ omarchy plugin remove community.agent-settings
 
 The plugin also updates itself. Once a day it checks this project's latest
 GitHub release and, when the panel is idle, fast-forwards the installed copy
-to that release's tag, never to unreleased commits. The new version loads the
-next time the panel starts. **Settings → About** shows the state, has
-**Check now**, and an **Update automatically** switch. A copy on another branch
-or with local edits is left alone.
+to that release's tag, never to unreleased commits. Once a new version is
+installed, closing the panel ends the old one at once, so the next open runs
+the new version; **Check now** in **Settings → About** reopens the panel in the
+new version straight away when nothing is running. About also shows the state
+and an **Update automatically** switch. A copy on another branch or with local
+edits is left alone.
 
 Finish or stop active work before updating or removing the plugin. Manual
 updates use the repository's default branch through Omarchy's normal updater;

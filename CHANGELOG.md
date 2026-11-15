@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- A newly installed version starts without waiting. Closing the panel used to
+  keep the old version in memory for a minute, so reopening still showed it,
+  although the message said to close and reopen. Now closing ends the old
+  version at once when nothing is running, and the next open runs the new
+  one. **Check now** in Settings reopens the panel in the new version
+  straight away, back on Settings, and so does an update that makes Omarchy
+  reload the bar icon and close the panel. Work in progress, queued messages
+  and the composer draft are kept.
+
 ## 0.2.4 — 2026-11-15
 
 - The bar icon shows when the agent has finished: if everything you asked for,
