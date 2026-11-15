@@ -55,7 +55,8 @@ policies. The plugin adds no telemetry endpoint, hosted backend or web server.
 Model metadata is queried without sending a user prompt. Claude metadata queries
 disable hooks, exclude MCP configuration and use a temporary working directory.
 Normal agent conversations preserve the user's CLI profile. Bar status contains
-only open/waiting state, the monitor name and a heartbeat timestamp.
+only open/waiting state, whether the last task finished or failed while the
+panel was hidden, the monitor name and a heartbeat timestamp.
 
 Native Codex and Claude requests travel through subprocess stdin. External CLI
 launches never include the initial request or configuration context in process

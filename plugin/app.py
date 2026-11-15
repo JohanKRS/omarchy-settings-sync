@@ -47,6 +47,8 @@ from features import machine_name
 from features_view import FeaturesPage, changes_for_sync, collect, local_catalog, results_path, run_changes
 
 NATIVE_AGENTS = {"codex", "claude"}
+# How the last task ended while the panel was hidden, for the bar icon.
+FINISHED_STATES = {"done", "failed"}
 DIRECTION_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
     str(Path(__file__).with_name('icons') / 'direction-upload-symbolic.svg')))
 APP_ICON_NAME = 'omarchy-settings-sync-symbolic'
@@ -255,6 +257,12 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.attention_waiting = False
         self.attention_opened = False
         self.attention_updated = 0
+        # A task that ended while the panel was hidden stays marked on the bar
+        # icon until the panel is shown, even if this process quits meanwhile.
+        previous = read_json(self.attention_file, {})
+        self.attention_finished = previous.get("finished") if isinstance(previous, dict) else ""
+        if self.attention_finished not in FINISHED_STATES:
+            self.attention_finished = ""
         self.monitor_name = ""
         self.terminal_pid = None
         self.last_prompt = ""
@@ -1333,6 +1341,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             adjustment.get_value() < adjustment.get_upper() - adjustment.get_page_size() - 2)
 
     def failure(self, message):
+        had_task = self.busy or self.delivery_pending or self.active_task is not None
         self.queue_paused = True
         self.redirect_entry = None
         self.stopping = False
@@ -1346,6 +1355,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.status.set_text(tr('Needs attention'))
         self.add_message(tr('Error'), message)
         self.update_buttons()
+        if had_task:
+            self.note_finished("failed")
         GLib.idle_add(self.quit_if_idle)
 
     def send(self, *_, queued=False, immediate=False):
@@ -1738,6 +1749,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.features_pending = False
                 self.features_page.refresh()
             self.drain_queue()
+            if turn.get("status") == "completed":
+                self.note_finished("done")
             GLib.idle_add(self.quit_if_idle)
         elif method == "client/disconnected":
             self.ready = False
@@ -2031,14 +2044,31 @@ class SettingsWindow(Gtk.ApplicationWindow):
     def update_attention(self, force=False):
         waiting = bool(self.question_windows)
         opened = self.get_visible()
+        # Seeing the panel, or the agent working again, clears the finished mark.
+        finished = "" if opened or waiting or self.busy else self.attention_finished
         if (force or waiting != self.attention_waiting or opened != self.attention_opened
+                or finished != self.attention_finished
                 or ((waiting or opened) and time.time() - self.attention_updated >= 9)):
             self.attention_waiting = waiting
             self.attention_opened = opened
+            self.attention_finished = finished
             self.attention_updated = time.time()
-            private_write(self.attention_file, {"waiting": waiting, "opened": opened,
+            private_write(self.attention_file, {"waiting": waiting, "opened": opened, "finished": finished,
                                                "monitor": self.monitor_name, "updated": self.attention_updated})
         return True
+
+    def note_finished(self, outcome):
+        """Mark the bar icon when the agent stops while the panel is hidden.
+
+        Only once nothing is left: no queued request was started, no question
+        is open, and no terminal session is running. "failed" outranks "done"
+        until the panel is seen."""
+        if (self.get_visible() or self.busy or self.delivery_pending or self.terminal_pid
+                or self.question_windows):
+            return
+        if self.attention_finished != "failed":
+            self.attention_finished = outcome
+        self.update_attention(force=True)
 
     def clear_questions(self):
         for panel in list(self.question_windows.values()):

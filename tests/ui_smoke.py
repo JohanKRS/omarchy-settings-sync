@@ -313,6 +313,29 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         for entry in queued[1:]:
             window.remove_queued(entry)
         assert not window.queue_area.get_visible()
+        # A task that ends while the panel is hidden marks the bar icon until
+        # the panel is shown again. A task seen ending, or stopped, is not marked.
+        def finished():
+            return json.loads(window.attention_file.read_text())["finished"]
+        assert finished() == ""
+        with patch.object(application, "quit"):
+            for hide, turn, expected in [
+                    (False, {'status': 'completed'}, ""),
+                    (True, {'status': 'interrupted'}, ""),
+                    (True, {'status': 'completed'}, "done"),
+                    (True, {'status': 'completed', 'error': {'message': 'Sample failure'}}, "failed")]:
+                window.present()
+                assert finished() == ""
+                assert window.submit('Finish a task')
+                wait(lambda: not window.delivery_pending)
+                if hide:
+                    window.dismiss()
+                window.event({'method': 'turn/completed', 'params': {'turn': turn}})
+                assert not window.busy and finished() == expected, (turn, finished())
+            window.note_finished("done")
+            assert finished() == "failed", "A later success must not hide a failure"
+            window.present()
+        assert finished() == ""
         # Clipboard image signals use synthetic textures, never the user's clipboard.
         texture = Gdk.MemoryTexture.new(320, 180, Gdk.MemoryFormat.R8G8B8A8,
                                        GLib.Bytes.new(bytes([80, 140, 220, 255]) * (320 * 180)), 320 * 4)

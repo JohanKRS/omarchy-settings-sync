@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
+import qs.Commons as Commons
 import qs.Ui as Ui
 
 Ui.BarWidget {
@@ -19,6 +20,24 @@ Ui.BarWidget {
   readonly property bool waiting: attention.waiting === true && fresh
   readonly property bool opened: attention.opened === true && fresh
     && (!attention.monitor || (hostWindow && hostWindow.screen && attention.monitor === hostWindow.screen.name))
+  // How the last task ended while the panel was hidden: "done" or "failed".
+  // Not a heartbeat: the panel clears it when it is shown, so it stays while
+  // the panel's process is closed.
+  readonly property string finished: waiting || opened ? ""
+    : attention.finished === "done" || attention.finished === "failed" ? attention.finished : ""
+  // A question or a failure needs you; a finished task only waits for you.
+  readonly property bool needsYou: waiting || finished === "failed"
+  readonly property string statusText: {
+    var texts = root.language === "pt"
+      ? ["Aguardando sua resposta · clique para abrir", "A tarefa parou com um erro · clique para ver",
+         "Tarefa concluída · clique para ver", "Clique para abrir"]
+      : root.language === "es"
+      ? ["Esperando tu respuesta · clic para abrir", "La tarea se detuvo con un error · clic para ver",
+         "Tarea terminada · clic para ver", "Clic para abrir"]
+      : ["Waiting for your reply · click to open", "The task stopped with an error · click to see",
+         "Task finished · click to see", "Click to open"]
+    return texts[root.waiting ? 0 : root.finished === "failed" ? 1 : root.finished === "done" ? 2 : 3]
+  }
   readonly property bool popoutSwitchClosing: false
 
   function open() { launch("") }
@@ -68,17 +87,11 @@ Ui.BarWidget {
     anchors.fill: parent
     bar: root.bar
     iconComponent: syncIcon
-    active: root.waiting
-    tooltipText: root.waiting
-               ? (root.language === "pt" ? "Omarchy Settings Sync\nAguardando sua resposta · clique para abrir"
-                  : root.language === "es" ? "Omarchy Settings Sync\nEsperando tu respuesta · clic para abrir"
-                  : "Omarchy Settings Sync\nWaiting for your reply · click to open")
-               : root.language === "pt" ? "Omarchy Settings Sync\nClique para abrir"
-               : root.language === "es" ? "Omarchy Settings Sync\nClic para abrir"
-               : "Omarchy Settings Sync\nClick to open"
+    active: root.needsYou
+    tooltipText: "Omarchy Settings Sync\n" + root.statusText
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.LeftButton) {
-        if (root.waiting) root.open()
+        if (root.waiting || root.finished !== "") root.open()
         else root.toggle()
       }
     }
@@ -138,16 +151,44 @@ Ui.BarWidget {
         }
       }
 
-      // Waiting for the user's reply: the same icon in the bar's active
-      // colour, plus a dot just outside its top-right corner.
+      // Marks just outside the icon's top-right corner. They are parented
+      // beside the icon rather than inside it, in the same coordinates, so
+      // that Omarchy, which fits an icon by the bounds of what it paints,
+      // keeps the icon the same size and place when one appears.
+
+      // A question or a failure needs you: the same icon in the bar's active
+      // colour, plus a dot.
       Rectangle {
-        visible: root.waiting
+        parent: syncGlyph.parent
+        visible: root.needsYou
         x: syncShape.x + syncGlyph.drawSize - 1
         y: syncShape.y - 2
         width: 4
         height: 4
         radius: 2
         color: syncGlyph.tint
+      }
+
+      // The task finished and the agent waits for you: a check in the
+      // theme's accent colour, the colour of the bar's open-panel mark.
+      Shape {
+        parent: syncGlyph.parent
+        visible: root.finished === "done"
+        x: syncShape.x + syncGlyph.drawSize - 0.5
+        y: syncShape.y - 3.5
+        width: 6
+        height: 5
+        preferredRendererType: Shape.GeometryRenderer
+        antialiasing: true
+
+        ShapePath {
+          fillColor: "transparent"
+          strokeColor: Commons.Color.accent
+          strokeWidth: 1.75
+          capStyle: ShapePath.FlatCap
+          joinStyle: ShapePath.MiterJoin
+          PathSvg { path: "M0.75 2.5L2.5 4.25L5.5 1.25" }
+        }
       }
     }
   }
