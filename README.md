@@ -283,7 +283,10 @@ installed, closing the panel ends the old one at once, so the next open runs
 the new version; **Check now** in **Settings → About** reopens the panel in the
 new version straight away when nothing is running. About also shows the state
 and an **Update automatically** switch. A copy on another branch or with local
-edits is left alone.
+edits is left alone. The bar icon follows an update by itself; when updating
+from 0.2.4 or earlier, the new icon appears after the next login or
+`omarchy restart shell`, because Omarchy keeps the widget it compiled when the
+session started.
 
 Finish or stop active work before updating or removing the plugin. Manual
 updates use the repository's default branch through Omarchy's normal updater;
