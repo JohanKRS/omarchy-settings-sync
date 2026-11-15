@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.4 — 2026-11-15
 
 - The bar icon shows when the agent has finished: if everything you asked for,
   queued follow-ups included, ends while the panel is hidden, a check in the
