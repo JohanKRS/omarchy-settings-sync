@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.5 — 2026-11-15
 
 - A newly installed version starts without waiting. Closing the panel used to
   keep the old version in memory for a minute, so reopening still showed it,
