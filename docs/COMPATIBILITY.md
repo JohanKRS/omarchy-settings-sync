@@ -29,8 +29,11 @@ decision; changing a published ID would require migration planning.
 The companion uses GTK4 Layer Shell for monitor-aware placement, focus, Escape
 and outside-click behavior. Visibility and pending-question state are shared
 through a small local heartbeat file, without conversation text. Expired state
-is ignored after 30 seconds. Shell open/close calls use the normal application
-entry point; a hide request never creates an absent panel.
+is ignored after 30 seconds. The same file records a task that finished or
+failed while the panel was hidden; that mark is not a heartbeat, so it stays
+after the idle process exits, until the panel is shown. Shell open/close calls
+use the normal application entry point; a hide request never creates an absent
+panel.
 
 The bar icon uses Omarchy's shared icon component and dimensions. The GTK panel
 reads the active theme's palette, font and control styling. It does not implement

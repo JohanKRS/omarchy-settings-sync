@@ -138,7 +138,7 @@ URL. An empty branch uses the repository's default branch. See the
 
 | Control | Behavior |
 | --- | --- |
-| Bar icon, left click | Open or hide the panel; reveal a pending question |
+| Bar icon, left click | Open or hide the panel; reveal a pending question or a finished task |
 | Bar icon, right click | No action |
 | **Conversation / Customizations** tabs | Talk to the agent, or switch individual customizations on and off for this machine |
 | **Sync**, at the bottom of Customizations | Apply repository updates to what is on for this machine; without a catalog, ask the agent to sync |
@@ -255,6 +255,12 @@ conversation or terminal handoff. Existing Claude configurations keep `auto`
 until changed. Plan mode prepares a plan; it is not a filesystem sandbox. Other CLIs
 keep their own permission interfaces, and their questions do not set the bar's
 question indicator. See [security and data handling](SECURITY.md).
+
+The bar icon tells you when the agent needs you while the panel is hidden. A
+pending question, or a task that stopped with an error, turns the icon to the
+theme's alert colour with a dot. When everything you asked for is done,
+including queued follow-ups, a check in the theme's accent colour appears
+beside the icon. Both clear when you open the panel.
 
 The interface supports English, Portuguese and Spanish. Documentation is in
 English. Theme colors, font and control styling follow the active Omarchy theme;

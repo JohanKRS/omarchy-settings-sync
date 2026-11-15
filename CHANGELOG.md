@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.4 — 2026-11-15
+
+- The bar icon shows when the agent has finished: if everything you asked for,
+  queued follow-ups included, ends while the panel is hidden, a check in the
+  theme's accent colour appears beside the icon until you open the panel. It
+  stays after the idle panel process closes. A task that stops with an error
+  instead shows the alert colour and dot used for pending questions, and the
+  tooltip says which one it is. Tasks you watched finish, or stopped yourself,
+  are not marked.
+- The question dot no longer changes the icon's size or position on Omarchy
+  versions that fit custom bar icons by their painted bounds.
+
 ## 0.2.3 — 2026-11-11
 
 - **New chat** opens the empty Conversation tab with the composer focused,
