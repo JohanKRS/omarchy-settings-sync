@@ -34,7 +34,10 @@ and 3.14; graphical and shell integration checks require an Omarchy session.
 ## Runtime layout
 
 - `manifest.json` declares the single `bar-widget` entry point.
-- `plugin/BarWidget.qml` renders the icon and forwards the shell lifecycle.
+- `plugin/BarWidget.qml` is the bar entry point and stays the same between
+  releases: the shell keeps its first compiled copy until it restarts. It
+  loads `plugin/BarWidgetContent.qml`, which renders the icon and forwards the
+  shell lifecycle, at a URL that changes with that file's content.
 - `plugin/app.py` provides the GTK panel and native conversation UI.
 - `plugin/core.py` implements Codex RPC and external CLI launch arguments.
 - `plugin/claude_client.py` adapts Claude's bidirectional stream protocol.

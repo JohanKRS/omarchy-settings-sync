@@ -35,6 +35,14 @@ after the idle process exits, until the panel is shown. Shell open/close calls
 use the normal application entry point; a hide request never creates an absent
 panel.
 
+Quickshell compiles the bar widget's entry file once per shell session and
+reuses that copy when Omarchy rebuilds the widget after the plugin's files
+change, so a changed `plugin/BarWidget.qml` would show only after the shell
+restarts. That file therefore stays the same between releases and loads the
+widget from `plugin/BarWidgetContent.qml` at a URL keyed by that file's content:
+an update reaches the bar at once, and the shell compiles nothing again while
+the content is unchanged.
+
 The bar icon uses Omarchy's shared icon component and dimensions. The GTK panel
 reads the active theme's palette, font and control styling. It does not implement
 all QML-specific gradient/border tokens, the complete `Style.spacing` contract,

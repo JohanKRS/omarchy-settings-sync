@@ -10,6 +10,12 @@
   straight away, back on Settings, and so does an update that makes Omarchy
   reload the bar icon and close the panel. Work in progress, queued messages
   and the composer draft are kept.
+- Updates now reach the bar icon too. Omarchy reused the bar widget it had
+  compiled when the session started, so a new version's icon, such as the
+  0.2.4 finished check, appeared only after `omarchy restart shell` or a new
+  login. The widget's entry file now stays the same and loads the icon from a
+  second file, which is read again whenever it changes. This takes effect from
+  the next time the shell starts after installing this version.
 
 ## 0.2.4 — 2026-11-15
 
