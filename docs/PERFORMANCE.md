@@ -5,7 +5,8 @@ starts just because it opens. Model metadata can refresh in the background.
 
 After an idle close, the interface stays in memory for up to 60 seconds. A new
 open request reaches that existing process through D-Bus, avoiding another GTK
-import and widget build. After the timeout, it exits. An active task, embedded
+import and widget build. After the timeout, it exits. When a newer version has
+been installed, it exits at once instead, so a reopen never shows the old code. An active task, embedded
 CLI or pending question keeps its process alive as before.
 
 Idle agent connections close in a worker so hiding the panel does not wait for

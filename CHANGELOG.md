@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.5 — 2026-11-15
+
+- A newly installed version starts without waiting. Closing the panel used to
+  keep the old version in memory for a minute, so reopening still showed it,
+  although the message said to close and reopen. Now closing ends the old
+  version at once when nothing is running, and the next open runs the new
+  one. **Check now** in Settings reopens the panel in the new version
+  straight away, back on Settings, and so does an update that makes Omarchy
+  reload the bar icon and close the panel. Work in progress, queued messages
+  and the composer draft are kept.
+- Updates now reach the bar icon too. Omarchy reused the bar widget it had
+  compiled when the session started, so a new version's icon, such as the
+  0.2.4 finished check, appeared only after `omarchy restart shell` or a new
+  login. The widget's entry file now stays the same and loads the icon from a
+  second file, which is read again whenever it changes. This takes effect from
+  the next time the shell starts after installing this version.
+
 ## 0.2.4 — 2026-11-15
 
 - The bar icon shows when the agent has finished: if everything you asked for,

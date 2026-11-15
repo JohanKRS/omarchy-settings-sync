@@ -264,6 +264,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.attention_finished not in FINISHED_STATES:
             self.attention_finished = ""
         self.monitor_name = ""
+        self.placement = []
         self.terminal_pid = None
         self.last_prompt = ""
         self.external_prompt = ""
@@ -276,11 +277,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
         message_view.LINK_OPENER = self.open_link
         self.updater = Updater(self.locations["state"] / "update.json")
         self.update_checking = False
+        self.hidden_by_bar = False
         if application.get_application_id() == "org.omarchy.AgentSettings":
             # Only the real panel talks to GitHub; tests and screenshots use other IDs.
             GLib.timeout_add_seconds(5, self.check_updates)
         self.update_attention(force=True)
         self.connect("notify::visible", lambda *_: self.update_attention(force=True))
+        self.connect("notify::visible", lambda *_: self.get_visible() and setattr(self, "hidden_by_bar", False))
         self.dictation = DictationInbox(self.insert_dictation)
         self.connect("notify::visible", lambda *_: self.dictation.watch(self.get_visible()))
         self.connect("close-request", self.close_window)
@@ -553,6 +556,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
             x = bar_size + margin if edge == "left" else geometry.width - width - bar_size - margin
             y = margin
         self.popup_bounds = (x, y, width, height)
+        # Where the bar asked for the panel, to show a relaunched panel there too.
+        self.placement = [f"--monitor={self.monitor_name}", f"--edge={edge}", f"--bar-size={bar_size}"]
+        if anchor_x is not None:
+            self.placement.append(f"--anchor-x={anchor_x}")
         self.popup_card.set_size_request(width, height)
         self.popup_canvas.move(self.popup_card, x, y)
         self.update_attention(force=True)
@@ -670,17 +677,29 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.set_visible(False)
         self.quit_if_idle()
 
-    def check_updates(self, force=False, install=None):
-        """Daily release check; installs only while idle, and the new code loads on the next start."""
+    def check_updates(self, force=False, install=None, restart=False):
+        """Daily release check; installs only while idle, and the new code loads on the next start.
+
+        With restart, as from the Settings buttons, a version installed while
+        nothing runs replaces this panel at once and reopens Settings."""
         if self.update_checking or not (force or self.updater.due()):
             return False
         idle = not (self.busy or self.terminal_pid or self.delivery_pending)
         install = idle and (self.settings.get("auto_update", True) if install is None else install)
         self.update_checking = True
+        self.hidden_by_bar = False
+        shown = self.get_visible()
         def done(_state):
             self.update_checking = False
+            # Omarchy reloads the bar widget when the plugin's files change, and
+            # the old widget closes the panel. Bring it back in the new version.
+            reopen = shown and ((restart and self.get_visible()) or self.hidden_by_bar)
+            if reopen and self.update_waiting() and self.restartable():
+                self.relaunch(*(["--settings"] if restart else []))
+                return
             if self.setup_panel in self.panels:
                 self.refresh_update_status()
+            self.quit_if_idle()
         def failed(message):
             self.update_checking = False
             self.status.set_text(message)
@@ -695,8 +714,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         release = self.updater.available()
         if self.update_checking:
             return tr('Checking for updates…')
-        if on_disk and on_disk != RUNNING_VERSION:
-            return tr('Version {version} is installed. Close and reopen the panel to use it.', version=on_disk)
+        if self.update_waiting():
+            return tr('Version {version} is installed and starts the next time you open the panel.', version=on_disk)
         if release:
             reason = {"branch": tr('This copy is on a test branch; switch it to main to update.'),
                       "modified": tr('The installed copy has local edits.'),
@@ -720,9 +739,41 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.get_visible() or self.busy or self.terminal_pid or self.question_windows or self.delivery_pending:
             return False
         self.close_client(background=True)
-        if self.idle_timer is None:
+        if self.update_waiting() and not self.update_checking:
+            # Staying warm would reopen the old code; the next open starts the new version.
+            self.get_application().quit()
+        elif self.idle_timer is None:
             self.idle_timer = GLib.timeout_add_seconds(60, self.expire_idle)
         return False
+
+    def update_waiting(self):
+        """A newer version is installed on disk than the one this process runs."""
+        on_disk = installed_version()
+        return bool(on_disk) and on_disk != RUNNING_VERSION
+
+    def restartable(self):
+        return not (self.busy or self.terminal_pid or self.question_windows or self.delivery_pending
+                    or self.image_pastes)
+
+    def relaunch(self, *arguments):
+        """Replace this process with the version on disk, shown where this panel was.
+
+        The new process starts once this one has exited, so that it owns the
+        application name instead of handing the request back to this one."""
+        self.save_conversation()
+        self.save_settings()
+        command = [str(Path(__file__).with_name("launch.sh")), *self.placement, *arguments]
+        wait = 'for _ in $(seq 100); do kill -0 "$0" 2>/dev/null || break; sleep 0.1; done; exec bash "$@"'
+        try:
+            subprocess.Popen(["bash", "-c", wait, str(os.getpid()), *command], start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as error:
+            self.status.set_text(str(error))
+            return False
+        self.close_client()
+        self.set_visible(False)
+        self.get_application().quit()
+        return True
 
     def expire_idle(self):
         self.idle_timer = None
@@ -2363,10 +2414,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.update_label = label("", "feature-subtitle")
             update_actions = box(False, 12)
             check = link_button(tr('Check now'))
-            check.connect("clicked", lambda *_: self.check_updates(force=True))
+            check.connect("clicked", lambda *_: self.check_updates(force=True, restart=True))
             update_actions.append(check)
             self.update_now = link_button(tr('Update now'))
-            self.update_now.connect("clicked", lambda *_: self.check_updates(force=True, install=True))
+            self.update_now.connect("clicked", lambda *_: self.check_updates(force=True, install=True, restart=True))
             update_actions.append(self.update_now)
             item(automatic, self.update_label, update_actions, spacing=4)
             self.refresh_update_status()
@@ -2407,6 +2458,7 @@ class Application(Gtk.Application):
     def handle_arguments(self, arguments):
         if "--hide" in arguments:
             if self.window:
+                self.window.hidden_by_bar = True
                 self.window.dismiss()
             return 0
         if "--quit" in arguments:
@@ -2435,6 +2487,8 @@ class Application(Gtk.Application):
         self.window.present()
         if "--sync" in arguments:
             GLib.idle_add(self.window.sync)
+        elif "--settings" in arguments and not self.window.panels:
+            GLib.idle_add(self.window.setup)
         return 0
 
 

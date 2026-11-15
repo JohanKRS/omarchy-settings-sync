@@ -15,4 +15,4 @@ fi
 imports_dir="$(mktemp -d)"
 trap 'rm -rf -- "$imports_dir"' EXIT
 ln -s "$shell_dir" "$imports_dir/qs"
-"$qml_linter" -I "$imports_dir" "$repo_dir/plugin/BarWidget.qml"
+"$qml_linter" -I "$imports_dir" "$repo_dir/plugin/BarWidget.qml" "$repo_dir/plugin/BarWidgetContent.qml"

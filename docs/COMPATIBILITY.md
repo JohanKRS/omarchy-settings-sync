@@ -35,6 +35,14 @@ after the idle process exits, until the panel is shown. Shell open/close calls
 use the normal application entry point; a hide request never creates an absent
 panel.
 
+Quickshell compiles the bar widget's entry file once per shell session and
+reuses that copy when Omarchy rebuilds the widget after the plugin's files
+change, so a changed `plugin/BarWidget.qml` would show only after the shell
+restarts. That file therefore stays the same between releases and loads the
+widget from `plugin/BarWidgetContent.qml` at a URL keyed by that file's content:
+an update reaches the bar at once, and the shell compiles nothing again while
+the content is unchanged.
+
 The bar icon uses Omarchy's shared icon component and dimensions. The GTK panel
 reads the active theme's palette, font and control styling. It does not implement
 all QML-specific gradient/border tokens, the complete `Style.spacing` contract,
@@ -43,7 +51,11 @@ are documented architectural differences, not a claim of pixel-identical native
 QML rendering.
 
 The interface remains available for up to 60 seconds after an idle close to
-speed up reopening. Idle agent connections are closed separately. Theme polling
+speed up reopening, except after an update was installed: then an idle close
+ends the process at once so that the next open runs the new code. An update
+started from Settings, or one that makes Omarchy reload the bar widget and
+close the panel, relaunches the panel in the new version when nothing is
+running. Idle agent connections are closed separately. Theme polling
 pauses while hidden; the VTE terminal is initialized only when an external CLI
 is launched. There is no permanent background sync service.
 
