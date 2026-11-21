@@ -300,5 +300,7 @@
   "Remove {count} customizations from the repository": "Remover {count} personalizações do repositório",
   "Removed here. The agent is tidying the repository’s documentation…": "Removida aqui. O agente está ajustando a documentação do repositório…",
   "“{title}” was removed from the repository.": "“{title}” foi removida do repositório.",
-  "{count} customizations were removed from the repository.": "{count} personalizações foram removidas do repositório."
+  "{count} customizations were removed from the repository.": "{count} personalizações foram removidas do repositório.",
+  "Applies to the messages you queue now. The current task keeps its choice.": "Vale para as mensagens que você colocar na fila agora. A tarefa atual mantém a escolha dela.",
+  "Applies when this message is sent.": "Vale quando esta mensagem for enviada."
 }

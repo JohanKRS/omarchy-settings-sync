@@ -101,6 +101,17 @@ def repository_url(value):
     return value.rstrip("/")
 
 
+def publication_note(publish):
+    """The push choice of a message added to a running turn that was told otherwise."""
+    return (
+        "Para esta mensagem, Salvar no repositório está LIGADO. Você está autorizado a publicar "
+        "na branch configurada as alterações reutilizáveis que ela pede depois de validar."
+        if publish else
+        "Para esta mensagem, Salvar no repositório está DESLIGADO. Aplique o que ela pede somente "
+        "neste computador; não crie commits remotos nem atualize a branch por causa dela."
+    )
+
+
 def make_prompt(task, *, repository, branch="", sync=False, publish=True, create=False, review_existing=False,
                 source=ROOT, thread_id=None, locations=None, features_task=None, migrate=False, machine=None,
                 checkout=None, local_catalog=None):
@@ -248,7 +259,7 @@ class CodexClient:
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
         self.request("initialize", {
-            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.2.5"},
+            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.2.6"},
             "capabilities": {"experimentalApi": True},
         })
         self.notify("initialized", {})
