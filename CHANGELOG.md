@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.6 — 2026-11-21
 
 - **Push changes** can be set for messages queued while the agent is working.
   The box under the message field stays available during a task and applies
