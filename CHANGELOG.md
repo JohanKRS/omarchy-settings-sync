@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Push changes** can be set for messages queued while the agent is working.
+  The box under the message field stays available during a task and applies
+  to the messages you queue then; the running task keeps the choice it
+  started with. Each queued message also shows its own box, which you can
+  change until it is sent. An answer to the agent's question keeps the running
+  task's choice. When Codex receives a message in its running task with
+  **Direct now** or Ctrl+Enter and that message's choice differs, the message
+  tells it.
+
 ## 0.2.5 — 2026-11-15
 
 - A newly installed version starts without waiting. Closing the panel used to

@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugin"))
 from app import Application, SettingsWindow, Gtk, Gdk, GLib, LayerShell
-from core import AGENTS, RpcError, private_write
+from core import AGENTS, RpcError, private_write, publication_note
 from claude_client import ClaudeClient
 
 CLAUDE_MODELS = [
@@ -279,11 +279,23 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         backend.steer.assert_called_once_with('test-thread', 'test-turn', 'Focus on the keyboard first')
         assert window.busy and backend.turn.call_count == 1
         assert len(window.outbox.for_agent('codex')) == 1
+        # Push changes stays available while working: each queued message keeps
+        # its own choice, which its row changes until it is sent.
+        queued_entry = window.outbox.for_agent('codex')[0]
+        assert window.publish.get_sensitive() and window.publish.get_tooltip_text()
+        assert window.turn_publish is True and queued_entry['publish'] is True
+        row_check = next(w for w in widgets(window.queue_list) if isinstance(w, Gtk.CheckButton))
+        assert row_check.get_active() and row_check.get_sensitive()
+        row_check.set_active(False)
+        assert queued_entry['publish'] is False and window.publish.get_active()
+        assert json.loads(window.outbox.path.read_text())[0]['publish'] is False
         window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
         wait(lambda: not window.delivery_pending)
         assert window.busy and backend.turn.call_count == 2
         assert not window.outbox.for_agent('codex')
         assert 'Run after the current response' in backend.turn.call_args.args[1]
+        assert 'Salvar no repositório está DESLIGADO' in backend.turn.call_args.args[1]
+        assert window.turn_publish is False
         assert backend.set_thread_name.call_count == 1, 'Follow-ups must preserve the history name'
         direction = window.queue_message('Promote this queued message')
         next(w for w in widgets(window.queue_list) if isinstance(w, Gtk.Button) and
@@ -291,6 +303,8 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         wait(lambda: not window.delivery_pending)
         assert not window.outbox.for_agent('codex') and direction not in window.outbox.entries
         assert window.busy and backend.turn.call_count == 2, 'Promoting a queue item must steer without duplicating it'
+        # Codex adds it to the running turn, which was told not to push.
+        assert backend.steer.call_args.args[2] == 'Promote this queued message\n\n' + publication_note(True)
         window.event({"method": "turn/completed",
                       "params": {"threadId": "test-thread", "turn": {"status": "completed"}}})
         assert not window.busy
@@ -644,9 +658,14 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
             old_turn, old_pid = window.turn_id, window.client.process.pid
             queued = window.queue_message('After choosing a color')
             window.queue_paused = True
+            # An answer belongs to the task that asked, whatever the box now says.
+            asked_publish = window.turn_publish
+            window.publish.set_active(not asked_publish)
             inline_body.choice_buttons[0].emit('clicked')
             inline_body.choice_buttons[1].emit('clicked')
             wait(lambda: not window.busy and not window.delivery_pending)
+            assert window.turn_publish is asked_publish
+            window.publish.set_active(asked_publish)
             assert window.client.process.pid == old_pid and window.thread_id == session_id
             assert window.messages[-1]['text'] == 'Received inline answer'
             assert window.outbox.for_agent('claude') == [queued]

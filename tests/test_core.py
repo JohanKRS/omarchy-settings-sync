@@ -8,7 +8,8 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugin"))
-from core import AGENTS, CodexClient, RpcError, external_command, make_prompt, permission_options, private_write, repository_url
+from core import (AGENTS, CodexClient, RpcError, external_command, make_prompt, permission_options, private_write,
+                  publication_note, repository_url)
 from i18n import language
 from context import snapshot, repository_state, begin_task, finish_task
 
@@ -34,6 +35,13 @@ class ConfigurationTest(unittest.TestCase):
         self.assertNotIn("JohanKRS", prompt)
         create = make_prompt("", repository="sample/new", create=True)
         self.assertIn("PRIVADO", create)
+
+    def test_a_message_added_to_a_running_turn_states_its_own_push_choice(self):
+        local = publication_note(False)
+        self.assertIn('DESLIGADO', local)
+        self.assertIn('esta mensagem', local)
+        self.assertIn('LIGADO', publication_note(True))
+        self.assertNotIn('DESLIGADO', publication_note(True))
 
     def test_change_requests_list_saved_customizations_to_extend(self):
         with tempfile.TemporaryDirectory() as temp:

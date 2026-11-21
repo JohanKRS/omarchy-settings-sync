@@ -57,7 +57,7 @@ APP_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
 
 from core import (
     AGENTS, ROOT, CodexClient, RpcError, cached_models, codex_defaults, default_agent, external_command,
-    make_prompt, paths, private_write, read_json, repository_url, terminal,
+    make_prompt, paths, private_write, publication_note, read_json, repository_url, terminal,
 )
 
 EFFORT_LABELS = {
@@ -226,6 +226,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.thread_id = None
         self.thread_loaded = False
         self.turn_id = None
+        # What the running task was told about pushing. Messages sent into it
+        # carry their own choice only when it differs (see steer).
+        self.turn_publish = None
         self.outbox = Outbox(self.locations["state"] / "outbox.json")
         self.queue_paused = bool(self.outbox.entries)
         self.draft_images = []
@@ -1051,7 +1054,12 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.effort_select.set_tooltip_text(tr('Effort') if len(self.effort_values) > 1 else tr('Effort is managed by this agent.'))
         self.refresh_models_button.set_sensitive(available and bool(self.executables[self.agent()]) and self.agent() in DISCOVERY_AGENTS | {"codex"} and self.agent() not in self.catalog_pending)
         self.input_area.set_sensitive(True)
-        self.publish.set_sensitive(not running and not self.delivery_pending)
+        # A queued message keeps the choice made when it was queued, so the box
+        # stays available while working. External CLIs only receive the first
+        # request's choice, so it would not apply to their follow-ups.
+        self.publish.set_sensitive(not self.terminal_pid)
+        self.publish.set_tooltip_text(tr('Applies to the messages you queue now. The current task keeps its choice.')
+                                      if self.busy else None)
         self.stop_button.set_sensitive(running and not self.stopping)
         self.stop_button.set_visible(running)
         working = self.busy and not self.attention_waiting
@@ -1076,7 +1084,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         entry['choices_answered'] = True
         body.set_choices_enabled(False)
         text = question + '\n' + choice
-        accepted = self.steer(text) if self.busy else self.submit(text)
+        accepted = self.steer(text, publish=self.turn_publish) if self.busy else self.submit(text)
         if not accepted:
             body.choices_answered = False
             entry.pop('choices_answered', None)
@@ -1157,13 +1165,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.send(immediate=bool(state & Gdk.ModifierType.CONTROL_MASK))
         return True
 
-    def queue_message(self, text, *, first=False, images=()):
+    def queue_message(self, text, *, first=False, images=(), publish=None):
         if not self.settings.get("repository"):
             self.setup()
             return None
         self.ensure_history_id(text)
+        publish = self.publish.get_active() if publish is None else publish
         entry = self.outbox.add(self.agent(), self.settings["repository"], self.settings.get("branch", ""),
-                                self.thread_id, text, self.publish.get_active(), first=first, images=images, conversation_id=self.history_id)
+                                self.thread_id, text, publish, first=first, images=images, conversation_id=self.history_id)
         self.save_conversation()
         self.save_settings()
         self.update_buttons()
@@ -1189,9 +1198,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
         for entry in entries:
             row = box(False, 2)
             row.add_css_class('queue-row')
+            if native:
+                row.append(self.queue_publish(entry))
             preview = Gtk.Label(label=' '.join(message_text(entry['text'], entry.get('images', [])).split()), xalign=0, hexpand=True,
                                 ellipsize=Pango.EllipsizeMode.END, width_chars=1, max_width_chars=1)
-            details = [message_text(entry['text'], entry.get('images', [])), tr('Push changes') if entry['publish'] else tr('Local changes only')]
+            details = [message_text(entry['text'], entry.get('images', []))]
+            if not native:
+                details.append(tr('Push changes') if entry['publish'] else tr('Local changes only'))
             warning = None
             if not self.queue_matches(entry):
                 warning = tr('From another conversation or repository. Edit to reuse.')
@@ -1224,6 +1237,24 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 button.set_sensitive(entry.get('state') != 'sending' and entry is not self.redirect_entry)
                 row.append(button)
             self.queue_list.append(row)
+
+    def queue_publish(self, entry):
+        """The queued message's own Push changes choice, changeable until it is sent."""
+        check = Gtk.CheckButton(active=entry['publish'], valign=Gtk.Align.CENTER)
+        check.set_margin_end(4)  # With the row's spacing, the composer box's gap to its label.
+        check.add_css_class('queue-publish')
+        title = tr('Push changes')
+        check.set_tooltip_text(title + '\n' + tr('Applies when this message is sent.'))
+        check.update_property([Gtk.AccessibleProperty.LABEL], [title])
+        check.set_sensitive(entry.get('state') == 'pending' and entry is not self.redirect_entry)
+        check.connect('toggled', lambda button: self.set_queued_publish(entry, button.get_active()))
+        return check
+
+    def set_queued_publish(self, entry, publish):
+        if entry not in self.outbox.entries or entry.get('state') != 'pending' or entry is self.redirect_entry:
+            return
+        entry['publish'] = publish
+        self.outbox.save()
 
     @staticmethod
     def queue_action(icon, title, action):
@@ -1439,10 +1470,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.update_images()
                 self.save_conversation()
 
-    def steer(self, text, *, queued_entry=None, images=()):
+    def steer(self, text, *, queued_entry=None, images=(), publish=None):
         if self.delivery_pending or self.stopping or not self.turn_id or self.agent() not in NATIVE_AGENTS:
             return False
-        entry = queued_entry or self.queue_message(text, first=True, images=images)
+        entry = queued_entry or self.queue_message(text, first=True, images=images, publish=publish)
         if not entry:
             return False
         self.delivery_pending = True
@@ -1479,8 +1510,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.add_message(tr('Error'), message)
             self.update_buttons()
             self.quit_if_idle()
+        # Claude starts a new turn with the message's own choice. Codex adds the
+        # message to the running turn, so say when its choice differs.
+        steered = text
+        if not is_claude and self.turn_publish is not None and entry['publish'] != self.turn_publish:
+            steered = (text + '\n\n' if text else '') + publication_note(entry['publish'])
         self.worker(lambda: client.request('turn/interrupt', {'threadId': thread_id, 'turnId': turn_id})
-                    if is_claude else client.steer(thread_id, turn_id, text, **({"images": images} if images else {})), accepted, rejected)
+                    if is_claude else client.steer(thread_id, turn_id, steered, **({"images": images} if images else {})), accepted, rejected)
         return True
 
     def sync(self):
@@ -1622,10 +1658,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.status.set_text(tr('The image attachment is missing or invalid.'))
             return False
         self.save_settings()
+        publish = (self.publish.get_active() if publish is None else publish) or create
         try:
             prompt = make_prompt(
                 text, repository=self.settings["repository"], branch=self.settings.get("branch", ""),
-                sync=sync, publish=(self.publish.get_active() if publish is None else publish) or create, create=create,
+                sync=sync, publish=publish, create=create,
                 review_existing=review_existing,
                 thread_id=self.thread_id if self.agent() in NATIVE_AGENTS else None,
                 locations=self.locations, features_task=features_task, migrate=migrate,
@@ -1654,6 +1691,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self.close_client()
         self.add_message(tr('You'), text, images=images)
         self.busy = True
+        self.turn_publish = publish
         self.delivery_pending = True
         if queued_entry:
             self.outbox.mark(queued_entry, 'sending')

@@ -144,13 +144,13 @@ URL. An empty branch uses the repository's default branch. See the
 | **Sync**, at the bottom of Customizations | Apply repository updates to what is on for this machine; without a catalog, ask the agent to sync |
 | Message field | Request a specific change; optionally publish its reusable configuration |
 | **Enter / Send / Queue** | The same button sends when idle and queues while an agent is working |
-| Queue above the message field | Compact one-line previews with **Direct now / Send now**, **Edit** and **Remove** icons; pause/resume beside the count |
+| Queue above the message field | Compact one-line previews with **Direct now / Send now**, **Edit** and **Remove** icons; pause/resume beside the count. For Codex and Claude, each message has its own **Push changes** box, which you can change until it is sent |
 | **Ctrl+V** with an image | Attach a screenshot to a native Codex/Claude prompt; remove it with the thumbnail’s × button |
 | **Ctrl+Enter** during native work | Steer Codex's current turn; interrupt and continue Claude in the same conversation |
 | Alternatives in a Codex/Claude conversation | Click an option to answer immediately, preserving the composer draft and queued messages |
 | **Copy request** for an external agent | Copy the initial request and context; paste into the CLI's message input and send |
 | **Copy to terminal** on a queued external message, or **Ctrl+Enter** | Copy a follow-up; paste into the agent input and use that CLI's send/queue controls |
-| **Push changes** | Authorize the agent to publish reusable changes to your configuration repository after validation; enabled by default |
+| **Push changes** | Authorize the agent to publish reusable changes to your configuration repository after validation; enabled by default. While the agent works, it sets the choice for the messages you queue; the running task keeps its own |
 | Agent, model, effort | Choose before starting; selections are remembered per agent |
 | **?** in the bar | Codex or Claude is waiting for an answer or permission |
 | Stop icon, beside Send/Queue while working | Interrupt a native conversation, or send Ctrl+C to an embedded CLI |
@@ -213,10 +213,11 @@ queue the draft first. New chat keeps pending messages with the previous
 conversation in History. Send or remove its pending messages before changing
 that conversation’s repository.
 Editing moves the queued text and its publication choice back into the main
-message field. The queue is hidden when empty and scrolls within a limited
-height when several messages are pending. Hover over a preview to read the full
-message and its publication choice; warning icons flag unconfirmed delivery or
-messages from another conversation.
+message field. A Codex or Claude message in the queue shows its publication
+choice as a box at the start of its row; change it there until the message is
+sent. The queue is hidden when empty and scrolls within a limited height when
+several messages are pending. Hover over a preview to read the full message;
+warning icons flag unconfirmed delivery or messages from another conversation.
 
 All supported agents have the local queue. Codex and Claude have automatic
 dispatch because their native connections report response boundaries. Other
