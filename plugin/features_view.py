@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 import platform
 import subprocess
 import time
@@ -81,6 +80,9 @@ class Snapshot:
     orphans: list = field(default_factory=list)
     release: dict = field(default_factory=dict)
 
+    def choice(self, feature):
+        return desired(feature, self.machine, applied=self.ledger.applied(feature.id))
+
     def impact(self, feature_id):
         """What the latest Omarchy update changed for a feature, unless already reviewed."""
         if feature_id in self.release.get("dismissed", []):
@@ -141,7 +143,7 @@ def collect(window, *, fetch=False):
         failing = probe.applicable(feature)
         if failing:
             snapshot.failing[feature.id] = failing
-        choice = desired(feature, snapshot.machine)
+        choice = snapshot.choice(feature)
         states = applier.inspect(feature) if choice == "on" and not failing else {}
         snapshot.states[feature.id] = states
         snapshot.labels[feature.id] = status(feature, choice, off_mode(feature, snapshot.machine),
@@ -192,22 +194,6 @@ def mark_reviewed(window, snapshot, version):
     release.save_snapshot(snapshot.features, defaults_snapshot(window, version))
     (state_dir(window) / "release-review.json").unlink(missing_ok=True)
     snapshot.release = {}
-
-
-def changes_for_sync(snapshot):
-    """Features a Sync should process on this machine: (feature, action, mode)."""
-    # Customizations removed from the repository are undone where they were applied.
-    result = [(feature, "off", "default") for feature in snapshot.orphans]
-    for feature in ordered(snapshot.features):
-        if feature.id in snapshot.failing:
-            continue
-        choice = desired(feature, snapshot.machine)
-        mode = off_mode(feature, snapshot.machine)
-        if choice == "on":
-            result.append((feature, "on", mode))
-        elif choice == "off" and snapshot.ledger.applied(feature.id) and mode != "keep":
-            result.append((feature, "off", mode))
-    return result
 
 
 def run_changes(window, snapshot, changes):
@@ -348,7 +334,7 @@ class FeaturesPage(Gtk.Box):
         sync.append(Gtk.Image.new_from_icon_name("view-refresh-symbolic"))
         sync.append(Gtk.Label(label=tr('Sync')))
         self.sync_button = Gtk.Button(child=sync, valign=Gtk.Align.CENTER, tooltip_text=tr(
-            'Apply repository updates to the customizations that are on for this machine'))
+            'Refresh the customization list from the repository'))
         self.sync_button.connect("clicked", lambda *_: self.window.sync())
         self.bar.append(self.sync_button)
         discard = Gtk.Button(label=tr('Discard'), valign=Gtk.Align.CENTER)
@@ -395,6 +381,7 @@ class FeaturesPage(Gtk.Box):
     # Data ------------------------------------------------------------------
     def refresh(self, fetch=None):
         """Show the local copy at once, then fetch the repository in the background."""
+        explicit = fetch is True
         if fetch is None:
             fetch = not self.window.busy and time.monotonic() - self.fetched > 60
         if fetch:
@@ -431,7 +418,12 @@ class FeaturesPage(Gtk.Box):
             self.loading = False
             self.show_banner(message, None)
             self.update_bar()
-        self.window.worker(lambda: collect(self.window), loaded, failed)
+        if explicit:
+            self.update_bar()
+            self.bar_text.set_text(tr('Checking the repository…'))
+            self.window.worker(lambda: collect(self.window, fetch=True), loaded_after_fetch, failed)
+        else:
+            self.window.worker(lambda: collect(self.window), loaded, failed)
 
     def fetch_remote(self, snapshot):
         """Fast-forward the working copy. Returns (list changed, problem)."""
@@ -459,7 +451,7 @@ class FeaturesPage(Gtk.Box):
     # Rendering ---------------------------------------------------------------
     def effective(self, feature):
         staged = self.staged.get(feature.id, {})
-        return staged.get("state") or desired(feature, self.snapshot.machine)
+        return staged.get("state") or self.snapshot.choice(feature)
 
     def release_focus(self):
         """Take focus off a row about to be rebuilt; return what it was on.
@@ -845,7 +837,7 @@ class FeaturesPage(Gtk.Box):
         off.append(choice)
         content.append(off)
         if removing:
-            text = tr('Leaves the repository when you apply; other machines undo it on their next Sync.')
+            text = tr('Apply removes this customization from the repository.')
             text += " " + tr(HERE[current])
             others = [f.title for f in dependents(snapshot.features, feature.id)]
             if others:
@@ -896,7 +888,7 @@ class FeaturesPage(Gtk.Box):
         entry.update(values)
         if not entry.get("remove"):
             entry.pop("remove", None)
-        base = desired(feature, self.snapshot.machine)
+        base = self.snapshot.choice(feature)
         if entry.get("state") == base:
             entry.pop("state")
         if entry.get("mode") == off_mode(feature, self.snapshot.machine):
@@ -968,12 +960,7 @@ class FeaturesPage(Gtk.Box):
             self.bar_text.remove_css_class("feature-subtitle")
         else:
             self.bar_text.add_css_class("feature-subtitle")
-            self.bar_text.set_text(self.sync_summary())
-            waiting = self.updates()
-            if waiting:
-                self.sync_button.add_css_class("suggested-action")
-            else:
-                self.sync_button.remove_css_class("suggested-action")
+            self.bar_text.set_text(tr('Choose customizations, then Apply.'))
             return
         by_id = {f.id: f for f in snapshot.features}
         removes = [i for i, e in self.staged.items() if e.get("remove")]
@@ -995,27 +982,6 @@ class FeaturesPage(Gtk.Box):
         if any(f.needs_agent for f in touched):
             parts.append(tr('uses the agent'))
         self.bar_text.set_text(" · ".join(parts))
-
-    def updates(self):
-        snapshot = self.snapshot
-        if not snapshot or not snapshot.catalog:
-            return 0
-        return sum(snapshot.labels.get(f.id) == "pending" for f in snapshot.features) + len(snapshot.orphans)
-
-    def sync_summary(self):
-        snapshot = self.snapshot
-        if not snapshot.catalog:
-            return tr('Without a catalog, Sync asks the agent.')
-        count = self.updates()
-        if count:
-            return tr('1 update to apply') if count == 1 else tr('{count} updates to apply', count=count)
-        when = snapshot.ledger.data.get("updated") if snapshot.ledger else None
-        try:
-            moment = datetime.fromisoformat(when).astimezone()
-        except (TypeError, ValueError):
-            return tr('Up to date')
-        stamp = moment.strftime('%H:%M') if moment.date() == datetime.now().date() else moment.strftime('%d/%m %H:%M')
-        return tr('Up to date · synced {time}', time=stamp)
 
     def apply(self):
         if not self.staged or self.window.busy or not self.snapshot:
@@ -1042,7 +1008,7 @@ class FeaturesPage(Gtk.Box):
         changes = []
         kept = [i for i in staged if i in by_id and not staged[i].get("remove")]
         for feature in ordered(snapshot.features, kept):
-            choice = desired(feature, machine)
+            choice = snapshot.choice(feature)
             mode = off_mode(feature, machine)
             if choice == "on":
                 changes.append((feature, "on", mode))

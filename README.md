@@ -65,9 +65,8 @@ Examples use synthetic data.
    enable **Push changes** when you want the agent to update that repository.
 3. **On another Omarchy installation**, install the plugin, authenticate your
    chosen agent and Git account, and select the same repository and branch.
-4. Open **Customizations** and click **Sync**. The agent compares the repository with that installation,
-   preserves local changes, adapts hardware-specific settings, and applies and
-   tests compatible components. Repeat Sync when you want to receive updates.
+4. Open **Customizations** and click **Sync** to refresh the list from the repository.
+   New entries stay off until you select their switches and click **Apply**.
 
 ### Turn customizations on or off per machine
 
@@ -78,8 +77,7 @@ change something already saved extends that switch instead of adding a second
 one. Changes are staged until **Apply**; turning one off can return it to the
 Omarchy default, keep it as it is, or restore the earlier backup.
 **Remove from repository** is staged the same way and asks nothing more: Apply
-undoes it here, deletes it from the repository and publishes that, and other
-machines undo it on their next Sync. The panel applies files, snippets,
+undoes it here, deletes it from the repository and publishes that, and refreshes the list. The panel applies files, snippets,
 keys, MIME defaults, services and packages itself, asking for the administrator
 password once when needed, and calls the agent only for steps that need its
 judgment or for conflicts with local edits. See the
@@ -94,7 +92,7 @@ After an Omarchy update, customizations whose Omarchy defaults changed are
 highlighted with what changed and quick actions: keep yours, use the new
 default, or adjust with the agent.
 
-Repositories created before the catalog keep the agent-led Sync. Use
+For repositories created before the catalog, use
 **Customizations → Create catalog** to convert one.
 
 This is an agent-assisted, on-demand workflow. It does not continuously mirror
@@ -141,7 +139,7 @@ URL. An empty branch uses the repository's default branch. See the
 | Bar icon, left click | Open or hide the panel; reveal a pending question or a finished task |
 | Bar icon, right click | No action |
 | **Conversation / Customizations** tabs | Talk to the agent, or switch individual customizations on and off for this machine |
-| **Sync**, at the bottom of Customizations | Apply repository updates to what is on for this machine; without a catalog, ask the agent to sync |
+| **Sync**, at the bottom of Customizations | Refresh the customization list from the configured repository |
 | Message field | Request a specific change; optionally publish its reusable configuration |
 | **Enter / Send / Queue** | The same button sends when idle and queues while an agent is working |
 | Queue above the message field | Compact one-line previews with **Direct now / Send now**, **Edit** and **Remove** icons; pause/resume beside the count. For Codex and Claude, each message has its own **Push changes** box, which you can change until it is sent |

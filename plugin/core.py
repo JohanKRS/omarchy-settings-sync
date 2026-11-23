@@ -122,8 +122,8 @@ def make_prompt(task, *, repository, branch="", sync=False, publish=True, create
     workflow = (Path(source) / "plugin/WORKFLOW.md").read_text()
     action = (
         "SINCRONIZAR AGORA. Busque o HEAD atual do repositório configurado, "
-        "reconcilie as personalizações e aplique todos os componentes compatíveis "
-        "neste computador, conforme o inventário abaixo. Teste e registre o resultado."
+        "atualize somente a lista de personalizações disponíveis para escolha no painel. "
+        "A aplicação depende de uma escolha explícita em Aplicar."
         if sync else task.strip()
     )
     if create:
@@ -259,7 +259,7 @@ class CodexClient:
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
         self.request("initialize", {
-            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.2.6"},
+            "clientInfo": {"name": "omarchy_agent_settings", "title": "Omarchy Settings Sync", "version": "0.2.7"},
             "capabilities": {"experimentalApi": True},
         })
         self.notify("initialized", {})

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.7 — 2026-11-23
+
+- **Sync** now refreshes the customization catalog for review. New entries appear
+  with their switches off, including entries whose catalog default is on.
+- Click **Apply** to apply your selected switches. Repositories without a catalog
+  offer **Create catalog** as a separate action.
+
 ## 0.2.6 — 2026-11-21
 
 - **Push changes** can be set for messages queued while the agent is working.

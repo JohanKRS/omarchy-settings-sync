@@ -226,6 +226,10 @@ packaging. These local checks do not replace marketplace review.
 
 ## Customizations catalog
 
+The 0.2.7 GTK fixture clicks Sync against a simulated remote catalog, checks
+that a new default-on entry appears switched off, and verifies that an explicit
+Apply sends selected work to the agent.
+
 The 0.2.0 update was checked on Omarchy 4.0.6-1, GTK 4.24.1, Codex CLI 0.166.0
 and Claude Code 2.1.317. The portable suite contains 91 tests: catalog parsing
 and validation, every part kind's apply and revert (including byte-identical

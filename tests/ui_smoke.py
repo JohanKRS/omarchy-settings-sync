@@ -899,8 +899,22 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         wait(lambda: page.snapshot is not None and page.snapshot.features)
         # No machine file yet: a new installation applies nothing until chosen.
         assert page.snapshot.labels == {"lock": "new", "idle": "new"}, page.snapshot.labels
+        # Sync refreshes the catalog even with a recent cache. No apply or agent handoff.
+        def fetch_catalog(workspace, repository, branch):
+            with (checkout_dir / "features.toml").open("a") as catalog:
+                catalog.write('\n[[feature]]\nid = "extra"\ntitle = "Extra"\ndefault = "on"\n'
+                              '[[feature.part]]\nkind = "agent"\ntitle = "Extra"\ninstructions = "Check"\n')
+            return checkout_dir, "new-revision", None
+        with patch.object(features_view.checkout, "update", side_effect=fetch_catalog) as fetch, \
+                patch.object(features_view, "run_changes") as apply, patch.object(window, "submit") as agent:
+            page.sync_button.emit("clicked")
+            wait(lambda: not page.loading and "extra" in page.snapshot.labels)
+            fetch.assert_called_once()
+            apply.assert_not_called()
+            agent.assert_not_called()
+            assert page.snapshot.labels["extra"] == "new" and not page.staged
         switches = [w for w in widgets(page.listing) if isinstance(w, Gtk.Switch)]
-        assert [s.get_active() for s in switches] == [False, False]
+        assert [s.get_active() for s in switches] == [False, False, False]
         switches[1].set_active(True)
         wait(lambda: page.apply_button.get_visible())
         assert not page.sync_button.get_visible()
@@ -1010,7 +1024,7 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         # Removing is staged like a switch; Apply deletes it from the repository
         # without a question or the agent when nothing else mentions it.
         page.refresh()
-        wait(lambda: not page.loading and len(page.snapshot.features) == 2)
+        wait(lambda: not page.loading and len(page.snapshot.features) == 3)
         lock = next(f for f in page.snapshot.features if f.id == "lock")
         page.stage_removal(lock)
         wait(lambda: page.apply_button.get_visible())
@@ -1024,7 +1038,7 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert 'id = "lock"' not in (checkout_dir / "features.toml").read_text()
         assert window.status.get_text() == tr('“{title}” was removed from the repository.', title=lock.title)
         assert window.pages.get_visible_child_name() == "features", "Removing keeps the Customizations tab open"
-        wait(lambda: not page.loading and [f.id for f in page.snapshot.features] == ["idle"])
+        wait(lambda: not page.loading and {f.id for f in page.snapshot.features} == {"idle", "extra"})
         wait(lambda: not window.busy)
         # New chat opens the empty conversation on its tab, from whichever tab is showing.
         for name in ("features", "settings"):

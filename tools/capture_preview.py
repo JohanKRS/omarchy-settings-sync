@@ -258,9 +258,11 @@ with tempfile.TemporaryDirectory(prefix='omarchy-settings-preview-') as temp:
         window.present()
         settle()
         x, y, width, height = map(int, window.popup_bounds)
-        region = f'{x},{y} {width}x{height}'
+        # GTK bounds are monitor-local; grim uses compositor-wide coordinates.
+        monitor = Gdk.Display.get_default().get_monitor_at_surface(window.get_surface()).get_geometry()
+        region = f'{monitor.x + x},{monitor.y + y} {width}x{height}'
         window.add_message('You', 'Set my terminal font to JetBrains Mono and save it for my other Omarchy machines.')
-        window.add_message('Agent', 'I’ll update the terminal font on this machine, save the portable setting in your repository and document how to apply it with **Sync** on the others.')
+        window.add_message('Agent', 'I’ll update the terminal font on this machine, save the portable setting in your repository. On your other machines, click **Sync**, select the setting and click **Apply**.')
         window.busy = True
         window.turn_id = 'preview-turn'
         window.status.set_text('Checking terminal settings…')
@@ -355,7 +357,7 @@ xdg-user-dir DESKTOP
         settle()
         ok, bounds = window.spinner.compute_bounds(window)
         assert ok
-        spinner_region = f'{int(bounds.get_x())},{int(bounds.get_y())} {int(bounds.get_width())}x{int(bounds.get_height())}'
+        spinner_region = f'{monitor.x + int(bounds.get_x())},{monitor.y + int(bounds.get_y())} {int(bounds.get_width())}x{int(bounds.get_height())}'
         frames = []
         for _ in range(3):
             settle()

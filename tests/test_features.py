@@ -237,7 +237,9 @@ package = "bad name"
         self.assertEqual(loaded, record)
         self.assertEqual(desired(self.by_id['idle'], loaded), 'on')
         self.assertEqual(desired(self.by_id['idle'], {}), 'new')
-        self.assertEqual(desired(self.by_id['lock-shortcut'], {}), 'on')
+        self.assertEqual(desired(self.by_id['lock-shortcut'], loaded), 'new')
+        self.assertEqual(desired(self.by_id['lock-shortcut'], loaded, applied=True), 'on')
+        self.assertEqual(desired(self.by_id['pdf'], loaded, applied=True), 'off')
         # A new machine (no file yet, or started fresh) applies nothing until chosen.
         fresh = load_machine(self.repo, 'never-saved')
         self.assertEqual(fresh['defaults'], 'ask')

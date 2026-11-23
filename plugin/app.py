@@ -44,7 +44,7 @@ from updater import Updater, installed_version
 RUNNING_VERSION = installed_version()  # The code in memory; the copy on disk may be newer after an update.
 import checkout
 from features import machine_name
-from features_view import FeaturesPage, changes_for_sync, collect, local_catalog, results_path, run_changes
+from features_view import FeaturesPage, local_catalog, results_path
 
 NATIVE_AGENTS = {"codex", "claude"}
 # How the last task ended while the panel was hidden, for the bar icon.
@@ -1526,31 +1526,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if self.busy or self.terminal_pid or self.delivery_pending:
             self.status.set_text(tr('Stop the current task first.'))
             return
-        self.busy = True
-        self.status.set_text(tr('Checking the repository…'))
-        self.update_buttons()
-        def work():
-            snapshot = collect(self, fetch=True)
-            if not snapshot.catalog:
-                return snapshot, None
-            if snapshot.binding_needed:
-                return snapshot, "choose-machine"
-            return snapshot, run_changes(self, snapshot, changes_for_sync(snapshot))
-        def done(result):
-            snapshot, outcomes = result
-            if outcomes is None:
-                # Repositories without a catalog keep the agent-led sync.
-                self.busy = False
-                self.submit(tr('Sync'), sync=True)
-                return
-            if outcomes == "choose-machine":
-                self.busy = False
-                self.update_buttons()
-                self.status.set_text(tr('Choose which machine this installation is, then sync again.'))
-                self.show_page("features")
-                return
-            self.features_applied(snapshot, outcomes, snapshot.problem, sync=True)
-        self.worker(work, done)
+        self.features_page.refresh(fetch=True)
+        self.show_page("features")
 
     def tab_for(self, name):
         return {"chat": self.chat_tab, "features": self.features_tab, "settings": self.settings_tab}[name]
@@ -1565,7 +1542,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         elif not self.panels:
             self.input.grab_focus()
 
-    def features_applied(self, snapshot, outcomes, problem=None, sync=False, removed=None):
+    def features_applied(self, snapshot, outcomes, problem=None, removed=None):
         """Report a plugin-side apply and hand anything left to the agent."""
         self.busy = False
         if "machine" not in self.settings:
@@ -1576,7 +1553,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         published = (removed or {}).get("problem")
         removing = {feature.id for feature, _ in entries}
         rest = [outcome for outcome in outcomes if outcome.feature.id not in removing]
-        local = any(outcome.delegated or outcome.errors for outcome in rest) or (sync and snapshot.errors)
+        local = any(outcome.delegated or outcome.errors for outcome in rest)
         cleanup = [(feature, done) for feature, done in entries if needs_agent(feature, done, outcomes, published)]
         if local or cleanup:
             tasks = []
@@ -1600,16 +1577,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
             if started and cleanup and self.pages.get_visible_child_name() == "features":
                 self.status.set_text(tr('Removed here. The agent is tidying the repository’s documentation…'))
         else:
-            changed = sum(len(outcome.done) for outcome in outcomes)
-            message = (tr('Customizations applied.') if not sync else
-                       tr('Synced: {count} changes applied.', count=changed) if changed else tr('No changes.'))
+            message = tr('Customizations applied.')
             if len(entries) == 1:
                 message = tr('“{title}” was removed from the repository.', title=entries[0][0].title)
             elif entries:
                 message = tr('{count} customizations were removed from the repository.', count=len(entries))
             if problem:
-                note = tr('Used the local copy: {problem}') if sync else tr('Not published: {problem}')
-                message += " " + note.format(problem=problem.splitlines()[0][:160])
+                message += " " + tr('Not published: {problem}', problem=problem.splitlines()[0][:160])
             self.status.set_text(message)
         self.features_page.refresh()
 

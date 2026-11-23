@@ -80,10 +80,11 @@ physical microphone, profile paths, usernames, sessions or credentials. Identify
 portable preferences. Keep hardware adaptations local and document conditions
 for shared components.
 
-## Sync
+## Sync and explicit application
 
-Clicking Sync authorizes fetching and applying all documented customizations
-compatible with the current installation.
+Clicking Sync refreshes the catalog for review. Each switch stages a choice
+for Apply. A repository without a catalog offers a separate Create catalog
+action. The steps below concern an explicit request to apply configuration.
 
 1. Inventory the components, including newly documented ones in README/SYNC.md.
    On repeat use, focus on changed components. Compare the remote, active files
@@ -147,8 +148,7 @@ simple parts itself and sends you only what needs judgment or a conflict.
   entry instead of creating another switch: change its values, add parts
   (optional parts with an `id` for choices the user may want separately), and
   update its title and summary to cover everything it now does. Keep its `id`
-  so every machine's choice still applies; machines that have it on receive
-  the new parts at their next Sync. Do not ask again about other machines.
+  so every machine's choice still applies; machines see the updated parts in the list. Do not ask again about other machines.
   Create a feature only for a behavior no entry covers, and say in your reply
   which entry you edited. Validation rejects two features that change the
   same file, line or key.
@@ -201,8 +201,8 @@ simple parts itself and sends you only what needs judgment or a conflict.
   OMARCHY" includes the changed defaults for one customization. Explain briefly
   what changed, adapt the customization only as much as needed, validate, and
   update the catalog when the adaptation is portable.
-- **Sync with a catalog** is run by the plugin. You are called only for the
-  parts it could not finish. Without a catalog, follow the Sync section above.
+- **Apply with a catalog** is run by the plugin. You are called only for the
+  selected parts it could not finish.
 
 To create the catalog for an existing repository, convert every component
 of the inventory, split shared files without changing behavior, apply the

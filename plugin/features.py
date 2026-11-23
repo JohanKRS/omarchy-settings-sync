@@ -738,14 +738,13 @@ def machine_text(name, record, *, hostname="", omarchy="", updated="", install="
     return "\n".join(lines) + "\n"
 
 
-def desired(feature, machine):
+def desired(feature, machine, *, applied=False):
     """'on', 'off' or 'new' for this machine."""
     choice = machine.get("features", {}).get(feature.id)
     if choice in ("on", "off"):
         return choice
-    if machine.get("defaults") == "ask" and feature.default == "on":
-        return "new"
-    return {"on": "on", "off": "off", "ask": "new"}[feature.default]
+    # Older machine files could rely on catalog defaults for installed features.
+    return "on" if applied and machine.get("defaults") != "ask" else "new"
 
 
 def off_mode(feature, machine):

@@ -42,7 +42,7 @@ next to the component they configure. In `SYNC.md`, document:
 
 A `features.toml` file at the root turns each customization into a switch in
 the panel's **Customizations** tab. Each machine turns features on or off
-independently, and Sync applies only what is on for that machine. In a
+independently. Sync fetches the catalog. The switches stage choices for Apply. In a
 repository without a catalog, the tab offers **Create catalog**, which asks the
 agent to convert the existing inventory; afterwards the agent keeps the catalog current whenever it creates
 or changes a setting.
@@ -56,7 +56,7 @@ title = "Super+L locks the screen"
 summary = "Super+Ctrl+L toggles the workspace layout."
 app = "hyprland"             # the panel groups customizations by app
 areas = ["hyprland"]         # every area it touches
-default = "on"               # for other machines: on, off or ask
+default = "on"               # catalog preference; new entries await a machine choice
 when = ["command:hyprctl"]   # package:, command:, path:, omarchy>=4.1; ! negates
 
 [[feature.part]]
@@ -131,8 +131,7 @@ features that change the same file, line or key fail `features.py validate`.
 then undoes the feature on this machine as its off choice says, deletes its
 catalog entry, its choices in `machines/` and the source files only it used, and
 publishes one commit. The agent is called only for what the panel cannot judge,
-such as mentions in README or SYNC.md, and is told not to ask questions. Other
-machines undo the feature on their next Sync.
+such as mentions in README or SYNC.md, and is told not to ask questions.
 
 Choices are stored in `machines/<name>.toml`. The name starts as the hostname.
 **Manage machines** in the Customizations tab lists every machine in the
@@ -140,7 +139,7 @@ repository with its hostname, Omarchy version and last update, and lets you
 rename or remove one, create a new one, or link this installation to an
 existing machine. After a reinstall the tab asks which machine the new
 installation is: use its previous choices, or **Start fresh** to keep the name
-but clear its choices. Sync waits for that answer. A new or fresh machine
+but clear its choices. Apply waits for that answer. A new or fresh machine
 installs nothing by itself: every customization starts as **New** until you
 turn it on, one by one or with **Turn all on**, and apply. A short, non-reversible id derived from `/etc/machine-id` tells a new
 installation apart from the old one without publishing the machine id:
@@ -161,8 +160,7 @@ name = "desktop"
 **Remove from repository**, in a customization's details, deletes it
 everywhere: the panel undoes it on this machine, returning to the Omarchy
 default, and asks the agent to delete its catalog entry, its source files, its
-documentation and its machine entries, then publish. Every other machine
-undoes it on its next Sync, using its own record of what was applied.
+documentation and its machine entries, then publish.
 
 ### After an Omarchy update
 
@@ -195,19 +193,10 @@ shared repository.
 
 ## First and subsequent syncs
 
-Select the same repository and branch in the plugin on each installation. The
-agent is instructed to compare existing configuration before changing anything,
-adopt matching components, preserve unpublished local edits and ask about
-unresolved conflicts. Each installation keeps its own backups and sync record.
-
-After a completed sync, the workflow checks the remote commit first. If it is
-unchanged, it asks the agent to return a short “No changes.” response. If it has
-changed, the agent should apply and verify the relevant changes. An interrupted
-or partial sync is not treated as completed.
-
-This fast path checks the recorded repository revision, not local configuration
-drift. If you changed files outside the plugin, explicitly ask the agent to
-compare and reconcile those local changes even when the remote commit is the same.
+Select the same repository and branch on each installation. Sync refreshes the
+catalog in Customizations. Previously selected switches keep their choices.
+New entries appear for review, including entries with a catalog default of
+`on`. Choose the settings you want and click Apply to change this machine.
 
 ## Publish changes from an installation
 
