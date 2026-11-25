@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugin"))
 from core import (AGENTS, CodexClient, RpcError, external_command, make_prompt, permission_options, private_write,
-                  publication_note, repository_url)
+                  publication_note, repository_url, workflow_digest, workflow_text)
 from i18n import language
 from context import snapshot, repository_state, begin_task, finish_task
 
@@ -35,6 +35,19 @@ class ConfigurationTest(unittest.TestCase):
         self.assertNotIn("JohanKRS", prompt)
         create = make_prompt("", repository="sample/new", create=True)
         self.assertIn("PRIVADO", create)
+
+    def test_a_session_receives_the_procedure_once(self):
+        first = make_prompt('Change my wallpaper', repository='sample/dotfiles')
+        later = make_prompt('Now the lock screen', repository='sample/dotfiles', thread_id='thread', workflow_sent=True)
+        self.assertIn(workflow_text(), first)
+        self.assertNotIn(workflow_text(), later)
+        self.assertIn('plugin/WORKFLOW.md', later)
+        self.assertIn('leia esse arquivo', later)
+        self.assertIn('Now the lock screen', later)
+        self.assertIn('Salvar no repositório está LIGADO', later)
+        self.assertLess(len(later), len(first) - 10000)
+        self.assertEqual(workflow_digest(workflow_text()), workflow_digest(workflow_text()))
+        self.assertNotEqual(workflow_digest(workflow_text()), workflow_digest(workflow_text() + 'x'))
 
     def test_a_message_added_to_a_running_turn_states_its_own_push_choice(self):
         local = publication_note(False)

@@ -1,6 +1,7 @@
 """Local Codex app-server client. No API keys, shell interpolation or cloud UI."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -112,14 +113,33 @@ def publication_note(publish):
     )
 
 
+def workflow_text(source=ROOT):
+    return (Path(source) / "plugin/WORKFLOW.md").read_text()
+
+
+def workflow_digest(text):
+    """Identifies the procedure a session received, so an updated plugin sends the new one."""
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
 def make_prompt(task, *, repository, branch="", sync=False, publish=True, create=False, review_existing=False,
                 source=ROOT, thread_id=None, locations=None, features_task=None, migrate=False, machine=None,
-                checkout=None, local_catalog=None):
+                checkout=None, local_catalog=None, workflow_sent=False):
+    """The request with its context. A session that already received this
+    procedure gets a pointer to it instead of another copy: every copy stays in
+    the conversation and is billed again as new input."""
     repository = repository_url(repository)
     locations = locations or paths()
     context = snapshot(locations, repository, branch, thread_id=thread_id,
                        operation="create" if create else "sync" if sync else "change")
-    workflow = (Path(source) / "plugin/WORKFLOW.md").read_text()
+    workflow = workflow_text(source)
+    if workflow_sent:
+        workflow = (
+            "o mesmo enviado na primeira mensagem desta sessão, em "
+            f"{Path(source) / 'plugin/WORKFLOW.md'}. Ele não é repetido a cada mensagem para não "
+            "acumular cópias no contexto. Se ele não estiver mais no seu contexto (por exemplo, depois "
+            "de um resumo automático da conversa), leia esse arquivo antes de agir."
+        )
     action = (
         "SINCRONIZAR AGORA. Busque o HEAD atual do repositório configurado, "
         "atualize somente a lista de personalizações disponíveis para escolha no painel. "
