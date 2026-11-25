@@ -1,7 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.2.8 — 2026-11-25
 
+- **Switching agents keeps the conversation.** Changing the agent in the
+  Conversation tab keeps the messages, the draft and the queued messages. An
+  agent new to the conversation receives the transcript so far with its first
+  request. An agent that already took part resumes its own session and
+  receives only what was said with other agents since its last turn. Terminal
+  agents get the transcript in the copied request, and their replies stay in
+  the terminal. A "Continuing with <agent>" line marks the switch, and History
+  lists every agent in a conversation.
+- The plugin's procedure is sent only with a session's first message. Later
+  messages point to the file, so a follow-up request drops from about 16.8 KB
+  to 1.7 KB. After a plugin update changes the procedure, the new one is sent
+  once.
 - **Sync** works while the agent is busy. It reads the repository without
   touching the agent's working copy. When the working copy cannot
   fast-forward, the list still shows the repository and says why.
