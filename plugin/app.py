@@ -58,7 +58,8 @@ APP_ICON = Gio.FileIcon.new(Gio.File.new_for_path(
 
 from core import (
     AGENTS, ROOT, CodexClient, RpcError, cached_models, codex_defaults, default_agent, external_command,
-    make_prompt, paths, private_write, publication_note, read_json, repository_url, terminal,
+    make_prompt, paths, private_write, publication_note, read_json, repository_url, terminal, workflow_digest,
+    workflow_text,
 )
 
 EFFORT_LABELS = {
@@ -219,6 +220,12 @@ class SettingsWindow(Gtk.ApplicationWindow):
         # The native session of each agent that has taken part in this conversation.
         self.sessions = {}
         self.opening_conversation = False
+        # Native sessions that already received the plugin's procedure, by its digest.
+        self.workflow_file = self.locations["state"] / "workflow-sessions.json"
+        self.workflow_sessions = read_json(self.workflow_file, {})
+        if not isinstance(self.workflow_sessions, dict):
+            self.workflow_sessions = {}
+        self.workflow_pending = None
         self.client = None
         self.client_epoch = 0
         self.closing_clients = []
@@ -1705,6 +1712,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return False
         self.save_settings()
         publish = (self.publish.get_active() if publish is None else publish) or create
+        native = self.agent() in NATIVE_AGENTS
+        workflow = workflow_text()
+        digest = workflow_digest(workflow)
         try:
             prompt = make_prompt(
                 text, repository=self.settings["repository"], branch=self.settings.get("branch", ""),
@@ -1715,10 +1725,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 machine=machine_name(self.settings),
                 checkout=checkout.location(self.locations["workspace"], self.settings["repository"]),
                 local_catalog=local_catalog(self),
+                workflow_sent=native and bool(self.thread_id) and self.workflow_sessions.get(self.thread_id) == digest,
             )
         except ValueError as error:
             self.failure(str(error))
             return False
+        # Remembered once the session has received it, when the turn starts.
+        self.workflow_pending = digest if native and workflow in prompt else None
         if self.replay_context:
             prompt = transcript_context(self.replay_context, resumed=bool(self.thread_id)) + prompt
         self.last_prompt = prompt
@@ -1797,12 +1810,22 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.worker(execute, lambda r: self.started(r["turn"]["id"], queued_entry) if client is self.client else None)
         return True
 
+    def remember_workflow(self, session, digest):
+        self.workflow_sessions.pop(session, None)
+        self.workflow_sessions[session] = digest
+        while len(self.workflow_sessions) > 200:
+            self.workflow_sessions.pop(next(iter(self.workflow_sessions)))
+        private_write(self.workflow_file, self.workflow_sessions)
+
     def finish_activity(self, status):
         self.clear_questions()
         finish_task(self.active_task, status, private_write)
         self.active_task = None
 
     def started(self, turn_id, queued_entry=None):
+        if self.workflow_pending and self.thread_id:
+            self.remember_workflow(self.thread_id, self.workflow_pending)
+        self.workflow_pending = None
         self.replay_context = []
         self.save_conversation()
         self.delivery_pending = False

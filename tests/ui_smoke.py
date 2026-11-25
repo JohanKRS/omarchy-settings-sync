@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugin"))
 from app import Application, SettingsWindow, Gtk, Gdk, GLib, LayerShell
-from core import AGENTS, RpcError, private_write, publication_note
+from core import AGENTS, RpcError, private_write, publication_note, workflow_text
 from claude_client import ClaudeClient
 from conversation_history import SWITCH_ROLE
 
@@ -785,6 +785,7 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert window.submit('Ajustar áudio')
         wait(lambda: not window.delivery_pending)
         assert window.busy and 'Ajustar áudio' in backend.turn.call_args.args[1]
+        assert workflow_text() in backend.turn.call_args.args[1], 'A new session receives the whole procedure'
         assert any(m['text'] == tr('Could not set the conversation name in the agent history. Your request will continue.')
                    for m in window.messages)
         window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
@@ -793,6 +794,10 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert window.submit('Continue the same conversation')
         wait(lambda: not window.delivery_pending)
         assert backend.set_thread_name.call_count == names_before
+        # The session already has the procedure; another copy would only add to its context.
+        resumed_prompt = backend.turn.call_args.args[1]
+        assert workflow_text() not in resumed_prompt and 'plugin/WORKFLOW.md' in resumed_prompt
+        assert 'Continue the same conversation' in resumed_prompt
         window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
         backend.set_thread_name.side_effect = None
         # History switches local drafts, queues, repository and native session
@@ -890,6 +895,7 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         prompt = next(p for p in sent if p.get('type') == 'user')['message']['content']
         assert 'Blue is configured.' in prompt and 'The font is now bigger.' in prompt
         assert 'since your last turn' not in prompt and prompt.index('The font is now bigger.') < prompt.index('CONTINUE-IN-CLAUDE')
+        assert workflow_text() in prompt, "Claude's new session receives the procedure"
         assert any(p.get('request', {}).get('subtype') == 'rename_session' and p['request']['title'] == title for p in sent)
         claude_session = window.thread_id
         assert claude_session and window.sessions == {'codex': codex_thread, 'claude': claude_session}
@@ -914,6 +920,7 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         prompt = backend.turn.call_args.args[1]
         assert 'since your last turn' in prompt and 'Claude continued' in prompt and 'CONTINUE-IN-CLAUDE' in prompt
         assert 'Blue is configured.' not in prompt, 'The resumed session already has its own turns'
+        assert workflow_text() not in prompt
         window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
         record = window.history.get(conversation)
         assert record['agents'] == ['codex', 'claude'] and record['agent'] == 'codex'
