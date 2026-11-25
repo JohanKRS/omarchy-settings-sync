@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'plugin'))
 from applier import Applier, Ledger, delegation, needs_agent, orphans, removal, status
-from features import (Probe, desired, expand, install_id, list_machines, load_catalog, load_machine,
+from features import (Probe, catalog_changes, desired, expand, install_id, list_machines, load_catalog, load_machine,
                       machine_path, machine_text, ordered, overlaps, part_enabled, remove_feature, remove_machine,
                       rename_machine, saved_list)
 
@@ -166,6 +166,14 @@ class FeatureTest(unittest.TestCase):
         self.assertIsNone(probe.applicable(self.by_id['pdf']))
         self.assertIsNone(probe.applicable(self.by_id['popups']))
         self.assertEqual(expand('${XDG_CONFIG_HOME:-$HOME/.config}/a'), self.home / '.config/a')
+
+    def test_sync_reports_what_entered_and_left_the_catalog(self):
+        before = [self.by_id['lock-shortcut'], self.by_id['idle'], self.by_id['pdf']]
+        after = [self.by_id['idle'], self.by_id['pdf'], self.by_id['popups']]
+        added, removed = catalog_changes(before, after)
+        self.assertEqual([f.id for f in added], ['popups'])
+        self.assertEqual([f.id for f in removed], ['lock-shortcut'])
+        self.assertEqual(catalog_changes(after, after), ([], []))
 
     def test_programs_and_app_groups(self):
         (self.repo / 'features.toml').write_text(CATALOG + '''

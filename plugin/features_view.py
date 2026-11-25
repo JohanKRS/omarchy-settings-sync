@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 import platform
 import subprocess
 import time
@@ -14,7 +15,7 @@ import checkout
 from context import repository_state
 from core import private_write, read_json
 import release
-from features import (GROUPS, Probe, dependents, desired, has_catalog, install_id, list_machines, load_catalog,
+from features import (GROUPS, Probe, catalog_changes, dependents, desired, has_catalog, install_id, list_machines, load_catalog,
                       load_machine, machine_name, machine_path, machine_text, off_mode, ordered, part_enabled,
                       remove_feature, remove_machine, rename_machine, valid_machine)
 from i18n import tr
@@ -64,9 +65,14 @@ def group_title(key):
 
 @dataclass
 class Snapshot:
-    checkout: Path = None
-    sha: str = ""
+    checkout: Path = None  # The working copy the plugin and the agent write to.
+    source: Path = None  # Where the catalog and its files are read: the working copy or a clean export.
+    sha: str = ""  # The commit the list shows.
+    head: str = ""  # The working copy's commit.
+    remote: str = ""  # The configured branch as last fetched.
+    changed: int = None  # When the commit the list shows was made, as a Unix time.
     problem: str = None
+    lag: str = None  # Why the working copy could not follow the repository.
     features: list = field(default_factory=list)
     errors: list = field(default_factory=list)
     machine_name: str = ""
@@ -91,7 +97,7 @@ class Snapshot:
 
     @property
     def catalog(self):
-        return has_catalog(self.checkout)
+        return has_catalog(self.source)
 
 
 def state_dir(window):
@@ -110,21 +116,52 @@ def make_applier(window, path, ledger):
     return Applier(path, ledger, window.locations["state"] / "backups", script_dir=state_dir(window))
 
 
-def collect(window, *, fetch=False):
-    """Read everything the tab shows. Runs in a worker thread."""
+def agent_working(window):
+    """Whether an agent may be changing the working copy right now."""
+    return bool(window.busy or window.terminal_pid or window.delivery_pending)
+
+
+def collect(window, *, fetch=False, settle=True):
+    """Read everything the tab shows. Runs in a worker thread.
+
+    The list shows the configured branch as last fetched. With `settle` (no
+    agent at work) the working copy is fast-forwarded to it first. When it is
+    not, or cannot be, the catalog comes from a clean export of that commit,
+    so the list never depends on the agent's unfinished work.
+    """
     snapshot = Snapshot(machine_name=machine_name(window.settings))
     repository = window.settings.get("repository")
     if not repository:
         snapshot.problem = tr('Choose a configuration repository in Settings.')
         return snapshot
-    path = checkout.location(window.locations["workspace"], repository)
+    workspace, branch = window.locations["workspace"], window.settings.get("branch", "")
+    path = checkout.location(workspace, repository)
     if fetch or not (path / ".git").exists():
-        path, snapshot.sha, snapshot.problem = checkout.update(
-            window.locations["workspace"], repository, window.settings.get("branch", ""))
-    else:
-        snapshot.sha = checkout.head(path)
-    snapshot.checkout = path
-    snapshot.features, snapshot.errors = load_catalog(path, local_catalog(window))
+        path, snapshot.head, snapshot.problem = checkout.update(workspace, repository, branch, fast_forward=False)
+    lag = checkout.catch_up(path, branch) if settle and (path / ".git").exists() else None
+    snapshot.head = checkout.head(path)
+    snapshot.remote, ahead, _ = checkout.compare(path, branch) if snapshot.head else ("", 0, 0)
+    source = path
+    if snapshot.remote and (snapshot.remote != snapshot.head or not settle):
+        copy = state_dir(window) / "published"
+        exported = checkout.export(path, snapshot.remote, copy)
+        if exported is None:
+            source = copy
+        elif settle:
+            lag = lag or exported
+    if settle and snapshot.remote and snapshot.remote != snapshot.head:
+        # Say why in words; git's own message names commands the user never ran.
+        changed = checkout.changed(path)
+        if ahead:
+            lag = (tr('it has 1 commit that is not in the repository') if ahead == 1 else
+                   tr('it has {count} commits that are not in the repository', count=ahead))
+        elif changed:
+            lag = tr('files changed here: {files}', files=", ".join(changed[:3]) + (" …" if len(changed) > 3 else ""))
+        snapshot.lag = (lag or tr('it cannot fast-forward')).splitlines()[0][:200]
+    snapshot.checkout, snapshot.source = path, source
+    snapshot.sha = snapshot.remote if source != path else snapshot.head
+    snapshot.changed = checkout.last_change(path, snapshot.sha) if snapshot.sha else None
+    snapshot.features, snapshot.errors = load_catalog(source, local_catalog(window))
     snapshot.machine = load_machine(path, snapshot.machine_name)
     snapshot.machines = list_machines(path)
     if "machine" not in window.settings and snapshot.machines:
@@ -133,7 +170,7 @@ def collect(window, *, fetch=False):
         mine = known.get(snapshot.machine_name)
         snapshot.binding_needed = not mine or bool(mine["install"] and mine["install"] != install_id())
     snapshot.ledger = Ledger(state_dir(window) / "applied.json")
-    applier = make_applier(window, path, snapshot.ledger)
+    applier = make_applier(window, source, snapshot.ledger)
     if results_path(window).exists():
         # Removed customizations the agent finished undoing are only in the ledger by now.
         applier.merge_agent_results(results_path(window), snapshot.features + orphans(snapshot.ledger, snapshot.features))
@@ -198,7 +235,7 @@ def mark_reviewed(window, snapshot, version):
 
 def run_changes(window, snapshot, changes):
     """Apply (feature, action, mode) triples; returns outcomes. Runs in a worker thread."""
-    applier = make_applier(window, snapshot.checkout, snapshot.ledger)
+    applier = make_applier(window, snapshot.source or snapshot.checkout, snapshot.ledger)
     outcomes = []
     offs = [change for change in changes if change[1] == "off"]
     ons = [change for change in changes if change[1] == "on"]
@@ -247,6 +284,38 @@ def save_machine(window, snapshot, publish):
         return None
     return checkout.publish(snapshot.checkout, window.settings.get("branch", ""), [path],
                             f"Update settings for {snapshot.machine_name}")
+
+
+def moment(timestamp):
+    """A time of day for today, otherwise the day and time."""
+    when = datetime.fromtimestamp(timestamp)
+    return tr('today at {time}', time=when.strftime('%H:%M')) if when.date() == datetime.now().date() \
+        else when.strftime('%d/%m %H:%M')
+
+
+def sync_note(before, after):
+    """What a Sync brought, for the tab's action bar; None when a banner explains a problem."""
+    if after.problem or not after.catalog:
+        return None
+    stamp = datetime.now().strftime('%H:%M')
+    if before is None or not before.sha:
+        return tr('Updated at {time}.', time=stamp)
+    added, removed = catalog_changes(before.features, after.features)
+    changes = []
+    if added:
+        changes.append(tr('“{title}” is new', title=added[0].title) if len(added) == 1
+                       else tr('{count} new', count=len(added)))
+    if removed:
+        changes.append(tr('“{title}” was removed', title=removed[0].title) if len(removed) == 1
+                       else tr('{count} removed', count=len(removed)))
+    if changes:
+        return tr('Updated at {time}: {changes}.', time=stamp, changes=", ".join(changes))
+    if after.sha != before.sha:
+        return tr('Updated at {time}. No customizations were added or removed.', time=stamp)
+    if after.changed:
+        return tr('Nothing new in the repository at {time}. Last change {when}.', time=stamp,
+                  when=moment(after.changed))
+    return tr('Nothing new in the repository at {time}.', time=stamp)
 
 
 class FeaturesPage(Gtk.Box):
@@ -319,6 +388,22 @@ class FeaturesPage(Gtk.Box):
         reviewed.connect("clicked", lambda *_: self.release_reviewed())
         self.release_notice.append(reviewed)
         main.append(self.release_notice)
+        # Customizations deleted from the repository that this machine still has.
+        self.orphan_notice = Gtk.Box(spacing=4, visible=False)
+        self.orphan_notice.add_css_class("features-notice")
+        self.orphan_text = Gtk.Label(xalign=0, hexpand=True, wrap=True)
+        self.orphan_text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.orphan_notice.append(self.orphan_text)
+        self.orphan_buttons = []
+        for label, mode, tip in (('Undo here', "default", 'Returns to the Omarchy default when you apply.'),
+                                 ('Keep here', "keep", 'Keeps the files as they are and stops tracking them when you apply.')):
+            button = Gtk.Button(label=tr(label), valign=Gtk.Align.CENTER, tooltip_text=tr(tip))
+            button.add_css_class("flat")
+            button.add_css_class("link-action")
+            button.connect("clicked", lambda _, mode=mode: self.decide_orphans(mode))
+            self.orphan_notice.append(button)
+            self.orphan_buttons.append(button)
+        main.append(self.orphan_notice)
         self.listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.listing.set_margin_end(10)  # Keep text clear of the overlay scrollbar.
         self.scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
@@ -372,6 +457,7 @@ class FeaturesPage(Gtk.Box):
         self.view = None
         self.position = 0
         self.fetched = 0
+        self.note = None  # What the last Sync brought, shown while nothing is staged.
 
     def sync_sensitivity(self):
         for widget in self.controls:
@@ -380,10 +466,14 @@ class FeaturesPage(Gtk.Box):
 
     # Data ------------------------------------------------------------------
     def refresh(self, fetch=None):
-        """Show the local copy at once, then fetch the repository in the background."""
+        """Show the copy on disk at once, then fetch the repository in the background.
+
+        Sync passes fetch=True. It fetches even while the agent works, and only
+        refreshes the list: nothing is applied until Apply.
+        """
         explicit = fetch is True
         if fetch is None:
-            fetch = not self.window.busy and time.monotonic() - self.fetched > 60
+            fetch = not agent_working(self.window) and time.monotonic() - self.fetched > 60
         if fetch:
             self.fetched = time.monotonic()
         if self.loading or not self.window.settings.get("repository"):
@@ -391,6 +481,8 @@ class FeaturesPage(Gtk.Box):
                 self.show_banner(tr('Choose a configuration repository in Settings.'), None)
             return
         self.loading = True
+        settle = not agent_working(self.window)
+        before = self.snapshot
         def loaded(snapshot):
             self.snapshot = snapshot
             self.render()
@@ -403,7 +495,7 @@ class FeaturesPage(Gtk.Box):
         def fetched(result):
             changed, problem = result
             if changed:
-                self.window.worker(lambda: collect(self.window), loaded_after_fetch, failed)
+                self.window.worker(lambda: collect(self.window, settle=settle), loaded_after_fetch, failed)
                 return
             self.loading = False
             if problem:
@@ -414,6 +506,9 @@ class FeaturesPage(Gtk.Box):
             self.loading = False
             self.snapshot = snapshot
             self.render()
+        def synced(snapshot):
+            self.note = sync_note(before, snapshot)
+            loaded_after_fetch(snapshot)
         def failed(message):
             self.loading = False
             self.show_banner(message, None)
@@ -421,16 +516,18 @@ class FeaturesPage(Gtk.Box):
         if explicit:
             self.update_bar()
             self.bar_text.set_text(tr('Checking the repository…'))
-            self.window.worker(lambda: collect(self.window, fetch=True), loaded_after_fetch, failed)
+            self.window.worker(lambda: collect(self.window, fetch=True, settle=settle), synced, failed)
         else:
-            self.window.worker(lambda: collect(self.window), loaded, failed)
+            self.window.worker(lambda: collect(self.window, settle=settle), loaded, failed)
 
     def fetch_remote(self, snapshot):
-        """Fast-forward the working copy. Returns (list changed, problem)."""
+        """Fetch the repository. Returns (whether the list may change, problem)."""
         repository = self.window.settings["repository"]
-        _, sha, problem = checkout.update(self.window.locations["workspace"], repository,
-                                          self.window.settings.get("branch", ""))
-        return sha != snapshot.sha and not problem, problem
+        branch = self.window.settings.get("branch", "")
+        path, _, problem = checkout.update(self.window.locations["workspace"], repository, branch, fast_forward=False)
+        if problem:
+            return False, problem
+        return checkout.remote_head(path, branch) != snapshot.remote, None
 
     def show_banner(self, text, mode, button=None):
         self.banner_mode = mode
@@ -524,8 +621,20 @@ class FeaturesPage(Gtk.Box):
                              "fix", tr('Fix with the agent'))
         elif snapshot.problem:
             self.show_banner(tr('Showing the local copy. {problem}', problem=snapshot.problem), None)
+        elif snapshot.lag:
+            self.show_banner(tr('The list shows the repository, but this PC’s local copy could not be updated: {problem}.',
+                                problem=snapshot.lag), None)
         else:
             self.show_banner("", None)
+        left = [feature for feature in snapshot.orphans if feature.id not in self.staged]
+        self.orphan_notice.set_visible(bool(left) and not snapshot.binding_needed)
+        if left:
+            self.orphan_text.set_text(
+                tr('“{title}” left the repository but is still applied here.', title=left[0].title) if len(left) == 1
+                else tr('{count} customizations left the repository but are still applied here.', count=len(left)))
+        for button in self.orphan_buttons:
+            button.set_sensitive(not self.window.busy)
+        self.controls += self.orphan_buttons
         # Only a brand-new machine needs the explanation; afterwards the New pill and filter suffice.
         applicable = [f for f in snapshot.features if snapshot.labels.get(f.id) != "unavailable"]
         fresh = bool(applicable) and all(snapshot.labels.get(f.id) == "new" for f in applicable)
@@ -921,6 +1030,12 @@ class FeaturesPage(Gtk.Box):
                 self.stage(feature, state=state)
         self.render()
 
+    def decide_orphans(self, mode):
+        """Stage undoing (or keeping) what left the repository; Apply does it."""
+        for feature in self.snapshot.orphans:
+            self.staged.setdefault(feature.id, {"orphan": mode})
+        self.render()
+
     def part_toggled(self, feature, key, active):
         parts = dict(self.staged.get(feature.id, {}).get("parts", {}))
         saved = self.snapshot.machine.get("parts", {}).get(key, "on")
@@ -946,7 +1061,8 @@ class FeaturesPage(Gtk.Box):
     def update_bar(self):
         snapshot = self.snapshot
         idle = self.window.sync_available() and not self.loading
-        self.sync_button.set_sensitive(idle)
+        # Sync only reads the repository, so it works while the agent does.
+        self.sync_button.set_sensitive(not self.loading)
         self.apply_button.set_sensitive(idle)
         if not snapshot:
             self.bar.set_visible(False)
@@ -960,14 +1076,20 @@ class FeaturesPage(Gtk.Box):
             self.bar_text.remove_css_class("feature-subtitle")
         else:
             self.bar_text.add_css_class("feature-subtitle")
-            self.bar_text.set_text(tr('Choose customizations, then Apply.'))
+            self.bar_text.set_text(self.note or tr('Choose customizations, then Apply.'))
             return
-        by_id = {f.id: f for f in snapshot.features}
+        by_id = {f.id: f for f in snapshot.features + snapshot.orphans}
         removes = [i for i, e in self.staged.items() if e.get("remove")]
         ons = [i for i, e in self.staged.items() if e.get("state") == "on" and i not in removes]
         offs = [i for i, e in self.staged.items() if e.get("state") == "off" and i not in removes]
-        other = [i for i, e in self.staged.items() if "state" not in e and i not in removes]
+        left = {i: e["orphan"] for i, e in self.staged.items() if e.get("orphan")}
+        other = [i for i, e in self.staged.items() if "state" not in e and i not in removes and i not in left]
         parts = []
+        undo = sum(mode != "keep" for mode in left.values())
+        if undo:
+            parts.append(tr('{count} to undo here', count=undo))
+        if len(left) - undo:
+            parts.append(tr('{count} to keep as they are', count=len(left) - undo))
         if removes:
             parts.append(tr('{count} to remove from the repository', count=len(removes)))
         if ons:
@@ -994,7 +1116,7 @@ class FeaturesPage(Gtk.Box):
         by_id = {feature.id: feature for feature in snapshot.features}
         removals = [by_id[i] for i, entry in staged.items() if entry.get("remove") and i in by_id]
         for identifier, entry in staged.items():
-            if entry.get("remove"):
+            if entry.get("remove") or entry.get("orphan"):
                 continue
             if "state" in entry:
                 machine.setdefault("features", {})[identifier] = entry["state"]
@@ -1005,7 +1127,9 @@ class FeaturesPage(Gtk.Box):
                     machine.setdefault("off", {})[identifier] = entry["mode"]
             for key, value in entry.get("parts", {}).items():
                 machine.setdefault("parts", {})[key] = value
-        changes = []
+        # What left the repository is undone first, the way the user chose.
+        changes = [(feature, "off", staged[feature.id]["orphan"]) for feature in snapshot.orphans
+                   if staged.get(feature.id, {}).get("orphan")]
         kept = [i for i in staged if i in by_id and not staged[i].get("remove")]
         for feature in ordered(snapshot.features, kept):
             choice = snapshot.choice(feature)
@@ -1025,6 +1149,7 @@ class FeaturesPage(Gtk.Box):
                 changes.append((feature, "off", mode))
         publish = self.window.publish.get_active()
         self.staged.clear()
+        self.note = None
         self.loading = True
         self.apply_button.set_sensitive(False)
         self.window.status.set_text(tr('Applying customizations…'))

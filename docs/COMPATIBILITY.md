@@ -228,7 +228,10 @@ packaging. These local checks do not replace marketplace review.
 
 The 0.2.7 GTK fixture clicks Sync against a simulated remote catalog, checks
 that a new default-on entry appears switched off, and verifies that an explicit
-Apply sends selected work to the agent.
+Apply sends selected work to the agent. It now clicks Sync while the agent is
+busy, checks that the working copy is not fast-forwarded and that the bar
+reports what Sync brought, and stages and applies undoing a customization that
+left the repository while still applied on this machine.
 
 The 0.2.0 update was checked on Omarchy 4.0.6-1, GTK 4.24.1, Codex CLI 0.166.0
 and Claude Code 2.1.317. The portable suite contains 91 tests: catalog parsing

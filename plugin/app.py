@@ -1520,11 +1520,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         return True
 
     def sync(self):
+        """Refresh the customization list from the repository; applies nothing."""
         if not self.settings.get("repository"):
             self.setup()
-            return
-        if self.busy or self.terminal_pid or self.delivery_pending:
-            self.status.set_text(tr('Stop the current task first.'))
             return
         self.features_page.refresh(fetch=True)
         self.show_page("features")
