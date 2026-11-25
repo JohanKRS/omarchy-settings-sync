@@ -181,9 +181,9 @@ class Theme:
             .feature-details {{ margin: 2px 0 2px 26px; padding-left: 12px; border-left: 2px solid alpha({accent}, .3); }}
             .feature-status {{ font-size: {max(1, size - 1)}px; color: alpha({fg}, .7); }}
             .status-dot {{ font-size: {max(1, size - 4)}px; }}
-            .status-dot.status-applied {{ color: {good}; }}
-            .status-dot.status-pending, .status-dot.status-staged {{ color: {warning}; }}
-            .status-dot.status-modified, .status-dot.status-remove {{ color: {urgent}; }}
+            .status-dot.status-applied, .status-dot.status-verified {{ color: {good}; }}
+            .status-dot.status-verification, .status-dot.status-restart, .status-dot.status-pending, .status-dot.status-staged {{ color: {warning}; }}
+            .status-dot.status-failed, .status-dot.status-review, .status-dot.status-modified, .status-dot.status-remove {{ color: {urgent}; }}
             .feature-row.removing .feature-title {{ text-decoration-line: line-through; color: alpha({fg}, .55); }}
             .status-dot.status-off, .status-dot.status-unavailable {{ color: alpha({fg}, .35); }}
             .feature-pill {{ font-size: {max(1, size - 2)}px; color: {accent}; background: alpha({accent}, .14);

@@ -116,6 +116,20 @@ System.
 | `system-file`, `package` | Plugin, one password prompt | Removes the file or restores the backup; restores base packages |
 | `agent` | The agent, with `instructions` | The agent, with the recorded state |
 
+An agent part can declare a read-only `verify` check when one file condition
+fully establishes the requested behavior. For example, a launcher part could use
+`verify = { kind = "ini", dest = "~/.local/share/applications/example.desktop", section = "Desktop Entry", values = { Exec = "example-launcher" } }`.
+The panel checks the value on refresh and before handing the part to the agent.
+Supported checks are `line`, `ini` and `json` on regular files up to 1 MiB
+inside the home directory. For profile discovery or behavior that depends on
+another enabled option, describe how to verify each case in `instructions`.
+Leave the automatic check out when a single condition would be ambiguous.
+
+Expand a customization to see the status of each part and the agent’s last
+observation. **Resume verification** sends the outstanding checks and current
+machine choices to the agent. Its report checkpoints each part, so a later
+session can resume after an interruption.
+
 Optional parts have an `id` and `optional = true` and get their own switch.
 When turning a feature off you can return to the Omarchy default, stop syncing
 and keep the current state, or restore the backup taken before it was first

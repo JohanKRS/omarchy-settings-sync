@@ -1039,6 +1039,18 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         # Machines: create and link, rename the linked one, remove another.
         window.show_page("features")
         wait(lambda: not page.loading and page.snapshot.machines)
+        assert page.snapshot.labels["idle"] == "verification"
+        page.expanded.add("idle")
+        page.render()
+        resume = next(w for w in widgets(page.listing)
+                      if isinstance(w, Gtk.Button) and w.get_label() == tr("Resume verification"))
+        with patch.object(window, "submit", return_value=True) as verify:
+            resume.emit("clicked")
+            task = verify.call_args.kwargs["features_task"]
+            assert "idle=on" in task and "CADA parte" in task and "agent-results.json" in task
+            assert not verify.call_args.kwargs["publish"]
+        window.show_page("features")
+        wait(lambda: not page.loading)
         page.show_machines()
         content = page.machines_content
         assert page.showing_machines and not window.panels, "Machines is a screen of the tab, not an overlay card"

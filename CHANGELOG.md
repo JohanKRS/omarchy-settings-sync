@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Customizations show which parts need verification, a restart, or review.
+  Resume verification sends the agent the remaining checks and related machine
+  choices. The agent saves its progress after each part.
+- Catalog authors can add a read-only file check to an agent part so the
+  panel recognizes an existing configuration automatically.
+
 ## 0.2.8 — 2026-11-25
 
 - **Switching agents keeps the conversation.** Changing the agent in the

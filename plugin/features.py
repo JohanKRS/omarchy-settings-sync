@@ -145,6 +145,18 @@ def check_part(feature_id, index, data, repository, errors):
         if name not in data:
             errors.append(f"{where}: missing {name}")
             return None
+    if "verify" in data:
+        check = data["verify"]
+        if (kind != "agent" or not isinstance(check, dict) or check.get("kind") not in ("line", "ini", "json")
+                or "verify" in check or "source" in check):
+            errors.append(f"{where}: verify must be a line, ini or json check on an agent part")
+            return None
+        if not isinstance(check.get("dest"), str) or (check["kind"] == "line"
+                and (not isinstance(check.get("text"), str) or not check["text"].strip())):
+            errors.append(f"{where}: verify requires a destination and a nonempty line for a line check")
+            return None
+        if check_part(feature_id, index, check, repository, errors) is None:
+            return None
     if kind == "block" and ("source" in data) == ("text" in data):
         errors.append(f"{where}: a block needs exactly one of source or text")
         return None

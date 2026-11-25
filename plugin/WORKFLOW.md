@@ -189,8 +189,12 @@ simple parts itself and sends you only what needs judgment or a conflict.
   before publishing. Keep SYNC.md as human documentation; the catalog is the
   inventory the plugin uses.
 - **Delegated work.** A request titled "APLICAR CONFIGURAÇÕES DO CATÁLOGO" lists
-  only the parts left for you. Apply or revert those, resolve listed conflicts
-  without discarding local edits, then write the result file it names.
+  only the parts left for you. Check each part against the requested behavior and this machine’s related
+  choices. Adopt an equivalent setup. Change only what is needed and verify
+  the result. After each part, atomically update the named JSON report,
+  retaining previous entries. Record a short observation or the exact blocker.
+  On interruption, resume at the first unresolved part. A restart that still
+  needs confirmation has its own result status.
 - **Removing a customization.** The plugin removes it itself: it undoes it
   here, deletes the catalog entry, its machine choices and the source files
   only it used, and publishes. A request titled "REMOVER PERSONALIZAÇÃO DO
