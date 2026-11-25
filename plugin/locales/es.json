@@ -306,5 +306,6 @@
   "“{title}” was removed from the repository.": "“{title}” se quitó del repositorio.",
   "{count} customizations were removed from the repository.": "Se quitaron {count} personalizaciones del repositorio.",
   "Applies to the messages you queue now. The current task keeps its choice.": "Se aplica a los mensajes que pongas en cola ahora. La tarea actual mantiene su elección.",
-  "Applies when this message is sent.": "Se aplica cuando se envíe este mensaje."
+  "Applies when this message is sent.": "Se aplica cuando se envíe este mensaje.",
+  "Continuing with {agent}": "Continuando con {agent}"
 }

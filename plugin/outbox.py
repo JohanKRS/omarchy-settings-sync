@@ -53,6 +53,15 @@ class Outbox:
                 entry["thread_id"] = current
         self.save()
 
+    def follow(self, conversation_id, previous, agent, thread_id):
+        """Queued messages of a conversation go with it to the agent that answers next."""
+        if not conversation_id:
+            return
+        for entry in self.for_agent(previous):
+            if entry.get('conversation_id') == conversation_id and entry.get('state') != 'sending':
+                entry.update(agent=agent, thread_id=thread_id)
+        self.save()
+
     @staticmethod
     def matches(entry, repository, branch, thread_id):
         return (entry["repository"], entry["branch"], entry["thread_id"]) == (repository, branch, thread_id)

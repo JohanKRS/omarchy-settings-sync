@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugin"))
 from app import Application, SettingsWindow, Gtk, Gdk, GLib, LayerShell
 from core import AGENTS, RpcError, private_write, publication_note
 from claude_client import ClaudeClient
+from conversation_history import SWITCH_ROLE
 
 CLAUDE_MODELS = [
     {"model": "", "displayName": "Default", "supportedReasoningEfforts": [{"reasoningEffort": "high"}]},
@@ -850,7 +851,76 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert 'Blue is configured.' in backend.turn.call_args.args[1]
         assert 'Now change the font' in backend.turn.call_args.args[1]
         assert not window.replay_context
+        window.event({'method': 'item/completed', 'params': {'item': {
+            'type': 'agentMessage', 'id': 'font-reply', 'text': 'The font is now bigger.'}}})
         window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        # Another agent continues the same conversation. Its queue and draft go
+        # with it, and switching back before saying anything leaves no trace.
+        conversation, codex_thread = window.history_id, window.thread_id
+        assert codex_thread
+        window.input.get_buffer().set_text('Draft that moves along')
+        moving = window.queue_message('Queued before switching')
+        window.agent_select.set_selected(window.agent_ids.index('claude'))
+        assert window.history_id == conversation and window.thread_id is None
+        assert window.content.get_visible_child_name() == 'chat'
+        assert window.messages[-1]['role'] == SWITCH_ROLE
+        assert window.transcript.get_last_child().get_text() == tr('Continuing with {agent}', agent='Claude Code').upper()
+        assert window.input.get_buffer().get_text(*window.input.get_buffer().get_bounds(), False) == 'Draft that moves along'
+        assert window.current_queue() == [moving] and moving['agent'] == 'claude' and window.queue_paused
+        assert [m['text'] for m in window.replay_context][-2:] == ['Now change the font', 'The font is now bigger.']
+        window.agent_select.set_selected(window.agent_ids.index('codex'))
+        assert window.thread_id == codex_thread and not window.replay_context
+        assert window.messages[-1]['text'] == 'The font is now bigger.'
+        assert moving['agent'] == 'codex' and moving['thread_id'] == codex_thread
+        window.remove_queued(moving)
+        window.input.get_buffer().set_text('')
+        # Claude joins with the transcript so far, in a new session named after the conversation.
+        window.agent_select.set_selected(window.agent_ids.index('claude'))
+        title = window.conversation_title()
+        sent = []
+        def recording_claude(event, **kwargs):
+            client = fake_claude(event, **kwargs)
+            deliver = client.send
+            client.send = lambda payload: (sent.append(payload), deliver(payload))[1]
+            return client
+        with patch('app.ClaudeClient', side_effect=recording_claude):
+            assert window.submit('CONTINUE-IN-CLAUDE with a darker color')
+            wait(lambda: not window.busy and not window.delivery_pending)
+        prompt = next(p for p in sent if p.get('type') == 'user')['message']['content']
+        assert 'Blue is configured.' in prompt and 'The font is now bigger.' in prompt
+        assert 'since your last turn' not in prompt and prompt.index('The font is now bigger.') < prompt.index('CONTINUE-IN-CLAUDE')
+        assert any(p.get('request', {}).get('subtype') == 'rename_session' and p['request']['title'] == title for p in sent)
+        claude_session = window.thread_id
+        assert claude_session and window.sessions == {'codex': codex_thread, 'claude': claude_session}
+        assert window.messages[-1]['text'] == 'Claude continued' and window.messages[-1]['agent'] == 'claude'
+        assert window.history.get(conversation)['name'] == title
+        # A terminal agent's request carries the conversation too.
+        window.agent_select.set_selected(window.agent_ids.index('gemini'))
+        assert window.content.get_visible_child_name() == 'chat' and window.thread_id is None
+        with patch.object(window, 'launch_external', return_value=True) as launch:
+            assert window.submit('Ask the terminal agent')
+        assert 'Claude continued' in launch.call_args.args[0] and 'Blue is configured.' in launch.call_args.args[0]
+        window.finish_activity('external_unverified')
+        # Back in Codex, its own session resumes and reads only what it missed.
+        window.agent_select.set_selected(window.agent_ids.index('codex'))
+        assert window.thread_id == codex_thread
+        assert [m['role'] for m in window.messages].count(SWITCH_ROLE) == 2, 'Gemini said nothing here'
+        backend.start_thread.return_value = {'thread': {'id': codex_thread}}
+        with patch('app.shutil.which', return_value='/usr/bin/codex'):
+            assert window.submit('Back in Codex')
+        wait(lambda: not window.delivery_pending)
+        assert backend.start_thread.call_args.args[2] == codex_thread
+        prompt = backend.turn.call_args.args[1]
+        assert 'since your last turn' in prompt and 'Claude continued' in prompt and 'CONTINUE-IN-CLAUDE' in prompt
+        assert 'Blue is configured.' not in prompt, 'The resumed session already has its own turns'
+        window.event({'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}})
+        record = window.history.get(conversation)
+        assert record['agents'] == ['codex', 'claude'] and record['agent'] == 'codex'
+        assert record['sessions'] == {'codex': codex_thread, 'claude': claude_session}
+        window.show_history()
+        assert any(isinstance(w, Gtk.Label) and w.get_text().startswith('Codex, Claude Code · ')
+                   for w in widgets(window.history_panel))
+        window.history_panel.destroy()
         window.setup()
         assert window.pages.get_visible_child_name() == "settings" and window.settings_tab.get_active()
         # Updates: the switch is saved, and a check with automatic updates off only reports.
@@ -1090,4 +1160,4 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         GLib.source_remove(window.theme_timer)
         GLib.source_remove(window.attention_timer)
         window.destroy()
-print("UI smoke passed: layout, questions, resume, cancellation, native queues and steering, acknowledgement races, all external queues, terminal, settings, customizations, dismissal")
+print("UI smoke passed: layout, questions, resume, cancellation, agent switching, native queues and steering, acknowledgement races, all external queues, terminal, settings, customizations, dismissal")
