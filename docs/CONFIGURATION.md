@@ -198,6 +198,24 @@ catalog in Customizations. Previously selected switches keep their choices.
 New entries appear for review, including entries with a catalog default of
 `on`. Choose the settings you want and click Apply to change this machine.
 
+Sync fetches the repository and shows its branch as it is on the remote. It
+applies nothing. When the working copy is idle, Sync fast-forwards it. While
+the agent works in it, or when it cannot fast-forward, the list is read from a
+clean copy of that commit in the plugin's state folder instead. Local changes
+that block a fast-forward are listed and never discarded. The action bar then
+says what Sync brought: the new and removed customizations, or nothing new
+since the repository's last change.
+
+A customization deleted from the repository leaves the list. If this machine
+still has it applied, a notice offers **Undo here**, which returns to the
+Omarchy default, or **Keep here**, which keeps the files and stops tracking
+them. Either one runs on Apply.
+
+Customizations saved with **Push changes** off stay in this machine's
+`features.local.toml` and never reach other machines. A switch is a choice for
+one machine, so turning it on in one installation does not turn it on in
+another.
+
 ## Publish changes from an installation
 
 Describe the change and enable **Push changes** to authorize publishing the

@@ -67,6 +67,9 @@ Examples use synthetic data.
    chosen agent and Git account, and select the same repository and branch.
 4. Open **Customizations** and click **Sync** to refresh the list from the repository.
    New entries stay off until you select their switches and click **Apply**.
+   Sync applies nothing, works while the agent is busy, and says what it
+   brought: new and removed customizations, or nothing new since the
+   repository's last change.
 
 ### Turn customizations on or off per machine
 
@@ -77,7 +80,9 @@ change something already saved extends that switch instead of adding a second
 one. Changes are staged until **Apply**; turning one off can return it to the
 Omarchy default, keep it as it is, or restore the earlier backup.
 **Remove from repository** is staged the same way and asks nothing more: Apply
-undoes it here, deletes it from the repository and publishes that, and refreshes the list. The panel applies files, snippets,
+undoes it here, deletes it from the repository and publishes that, and refreshes the list.
+On other machines Sync takes it off the list; if it was applied there, a notice
+offers **Undo here** or **Keep here**, done on Apply. The panel applies files, snippets,
 keys, MIME defaults, services and packages itself, asking for the administrator
 password once when needed, and calls the agent only for steps that need its
 judgment or for conflicts with local edits. See the

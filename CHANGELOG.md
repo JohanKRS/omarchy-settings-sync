@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Sync** works while the agent is busy. It reads the repository without
+  touching the agent's working copy. When the working copy cannot
+  fast-forward, the list still shows the repository and says why.
+- After Sync, the bar says what changed: new and removed customizations, or
+  nothing new since the repository's last change.
+- A customization deleted from the repository that is still applied here shows
+  a notice with **Undo here** or **Keep here**. Either one runs on Apply.
+
 ## 0.2.7 — 2026-11-23
 
 - **Sync** now refreshes the customization catalog for review. New entries appear

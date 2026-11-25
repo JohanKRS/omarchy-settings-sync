@@ -766,7 +766,8 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
                 window.launch_external("test")
                 wait(lambda: window.terminal_pid is not None)
                 assert window.stop_button.get_visible()
-                assert not window.sync_button.get_sensitive()
+                # Sync only reads the repository, so it stays available; Apply waits.
+                assert window.sync_button.get_sensitive() and not window.features_page.apply_button.get_sensitive()
                 wait(lambda: window.terminal_pid is None)
                 assert window.send_button.get_sensitive()
         window.client = None
@@ -899,20 +900,41 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         wait(lambda: page.snapshot is not None and page.snapshot.features)
         # No machine file yet: a new installation applies nothing until chosen.
         assert page.snapshot.labels == {"lock": "new", "idle": "new"}, page.snapshot.labels
-        # Sync refreshes the catalog even with a recent cache. No apply or agent handoff.
-        def fetch_catalog(workspace, repository, branch):
+        # Sync refreshes the catalog even with a recent cache, and even while the
+        # agent works. No apply or agent handoff; the tab says what it brought.
+        def fetch_catalog(workspace, repository, branch, **options):
             with (checkout_dir / "features.toml").open("a") as catalog:
                 catalog.write('\n[[feature]]\nid = "extra"\ntitle = "Extra"\ndefault = "on"\n'
                               '[[feature.part]]\nkind = "agent"\ntitle = "Extra"\ninstructions = "Check"\n')
             return checkout_dir, "new-revision", None
+        window.busy = True
+        window.update_buttons()
+        assert page.sync_button.get_sensitive(), "Sync works while the agent does"
         with patch.object(features_view.checkout, "update", side_effect=fetch_catalog) as fetch, \
+                patch.object(features_view.checkout, "catch_up") as catch_up, \
                 patch.object(features_view, "run_changes") as apply, patch.object(window, "submit") as agent:
             page.sync_button.emit("clicked")
             wait(lambda: not page.loading and "extra" in page.snapshot.labels)
             fetch.assert_called_once()
+            assert fetch.call_args.kwargs["fast_forward"] is False
+            catch_up.assert_not_called()  # The agent's working copy is left alone.
             apply.assert_not_called()
             agent.assert_not_called()
             assert page.snapshot.labels["extra"] == "new" and not page.staged
+            assert page.bar_text.get_text() == page.note and page.note, page.bar_text.get_text()
+        window.busy = False
+        window.update_buttons()
+        from features import Feature
+        before = page.snapshot
+        later = features_view.Snapshot(checkout=before.checkout, source=before.source, sha="b" * 40,
+                                       features=[f for f in before.features if f.id != "lock"]
+                                       + [Feature(id="more", title="More", parts=[])])
+        before.sha = "a" * 40
+        note = features_view.sync_note(before, later)
+        assert tr('“{title}” is new', title="More") in note and tr('“{title}” was removed', title="Super+L locks") in note, note
+        later.features, later.sha, later.changed = before.features, before.sha, int(time.time())
+        when = time.strftime('%H:%M', time.localtime(later.changed))
+        assert tr('today at {time}', time=when) in features_view.sync_note(before, later)
         switches = [w for w in widgets(page.listing) if isinstance(w, Gtk.Switch)]
         assert [s.get_active() for s in switches] == [False, False, False]
         switches[1].set_active(True)
@@ -1040,6 +1062,33 @@ with tempfile.TemporaryDirectory(prefix="agent-settings-ui-") as temp:
         assert window.pages.get_visible_child_name() == "features", "Removing keeps the Customizations tab open"
         wait(lambda: not page.loading and {f.id for f in page.snapshot.features} == {"idle", "extra"})
         wait(lambda: not window.busy)
+        # A customization deleted elsewhere that is still applied here gets a
+        # notice; undoing it waits for Apply.
+        ledger_path = features_view.state_dir(window) / "applied.json"
+        ledger = json.loads(ledger_path.read_text()) if ledger_path.exists() else {"version": 1, "features": {}}
+        ledger["features"]["gone"] = {"title": "Gone", "parts": {"step": {
+            "status": "applied", "kind": "agent", "index": 0,
+            "part": {"kind": "agent", "title": "Step", "instructions": "Undo it"}}}}
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_text(json.dumps(ledger))
+        page.refresh()
+        wait(lambda: not page.loading and page.snapshot.orphans)
+        assert page.orphan_notice.get_visible()
+        assert page.orphan_text.get_text() == tr('“{title}” left the repository but is still applied here.', title="Gone")
+        page.orphan_buttons[0].emit("clicked")
+        assert page.staged == {"gone": {"orphan": "default"}} and not page.orphan_notice.get_visible()
+        assert page.bar_text.get_text().startswith(tr('{count} to undo here', count=1)), page.bar_text.get_text()
+        with patch.object(features_view, "run_changes", return_value=[]) as undo, \
+                patch.object(features_view.checkout, "publish") as push:
+            page.apply_button.emit("clicked")
+            wait(lambda: undo.called and not page.loading)
+            assert [(f.id, action, mode) for f, action, mode in undo.call_args.args[2]] == [("gone", "off", "default")]
+            push.assert_not_called()
+        ledger["features"].pop("gone")
+        ledger_path.write_text(json.dumps(ledger))
+        page.refresh()
+        wait(lambda: not page.loading and not page.snapshot.orphans)
+        assert not page.orphan_notice.get_visible()
         # New chat opens the empty conversation on its tab, from whichever tab is showing.
         for name in ("features", "settings"):
             window.add_message('You', 'Start over from ' + name, save=False)

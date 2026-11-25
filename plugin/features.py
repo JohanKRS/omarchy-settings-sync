@@ -308,6 +308,13 @@ def load_catalog(repository, local_catalog=None):
     return features, errors
 
 
+def catalog_changes(before, after):
+    """Features (added, removed) between two readings of the catalog, by id."""
+    old = {feature.id for feature in before}
+    new = {feature.id for feature in after}
+    return [f for f in after if f.id not in old], [f for f in before if f.id not in new]
+
+
 def has_catalog(repository):
     return bool(repository) and (Path(repository) / CATALOG).is_file()
 
