@@ -36,6 +36,18 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def instructions_digest(part, repository):
+    reference = str(part.data["instructions"]).split("#", 1)[0]
+    path = Path(part.base or repository) / reference
+    if reference and not Path(reference).is_absolute() and ".." not in Path(reference).parts:
+        try:
+            if path.is_file():
+                return digest(path.read_bytes() + str(part.data["instructions"]).encode())
+        except OSError:
+            pass
+    return digest(str(part.data["instructions"]))
+
+
 class Conflict(Exception):
     """The destination changed outside the plugin; the agent reconciles it."""
 
@@ -737,28 +749,46 @@ class Applier:
         name = {"json": "keys", "ini": "keys", "mime": "keys"}.get(part.kind, part.kind.replace("-", "_"))
         return getattr(self, f"{verb}_{name}")
 
-    def inspect(self, feature):
-        """Return {part key: state} for parts the plugin manages, plus agent records."""
+    def agent_matches(self, feature, part, record):
+        """A catalog check, when available, takes precedence over the previous report."""
+        check = part.data.get("verify")
+        if check:
+            probe = Part(check["kind"], check, part.index, part.base)
+            try:
+                dest = self.dest(probe)
+                if not inside(dest.resolve(), self.home.resolve()) or not dest.is_file() or dest.stat().st_size > 2**20:
+                    return False
+                return self.handler(probe, "inspect")(feature, probe, None) == "applied"
+            except (OSError, RuntimeError, ValueError, Conflict):
+                return False
+        return bool(record and record.get("status") == "applied"
+                    and record.get("instructions") == instructions_digest(part, self.repository))
+
+    def inspect(self, feature, machine=None, choice="on"):
+        """Per-part state for the selected direction, including unfinished reversions."""
         result = {}
         for part in feature.parts:
-            record = self.ledger.part(feature.id, part.key)
-            if part.agent:
-                current = self.instructions_digest(part)
-                result[part.key] = ("applied" if record and record.get("status") == "applied"
-                                    and record.get("instructions") == current else "missing")
-                continue
-            try:
-                result[part.key] = self.handler(part, "inspect")(feature, part, record)
-            except (OSError, ValueError, Conflict):
-                result[part.key] = "modified"
+            record = self.ledger.part(feature.id, part.key) or {}
+            enabled = choice == "on" and part_enabled(feature, part, machine or {})
+            if not enabled:
+                state = ("verification" if part.agent else "removal") if record else "off"
+            elif part.agent:
+                state = "applied" if self.agent_matches(feature, part, record) else "verification"
+            else:
+                try:
+                    state = self.handler(part, "inspect")(feature, part, record)
+                except (OSError, ValueError, Conflict):
+                    state = "modified"
+            reported = record.get("status")
+            if reported in ("failed", "review", "restart"):
+                # A restart or unresolved conflict needs explicit confirmation.
+                # A failed file check can clear once its destination matches.
+                if reported != "failed" or state != "applied" or part.admin or part.kind == "user-service":
+                    state = reported
+            elif reported == "delegated" and (not enabled or state != "applied"):
+                state = "verification"
+            result[part.key] = state
         return result
-
-    def instructions_digest(self, part):
-        reference = str(part.data["instructions"]).split("#", 1)[0]
-        path = Path(part.base or self.repository) / reference
-        if reference and not Path(reference).is_absolute() and ".." not in Path(reference).parts and path.is_file():
-            return digest(path.read_bytes() + str(part.data["instructions"]).encode())
-        return digest(str(part.data["instructions"]))
 
     def enable(self, feature, machine):
         outcome = Outcome(feature, "on")
@@ -769,13 +799,21 @@ class Applier:
                 continue
             record = self.ledger.part(feature.id, part.key)
             if part.agent:
-                if not (record and record.get("status") == "applied"
-                        and record.get("instructions") == self.instructions_digest(part)):
+                if ((record or {}).get("status") not in ("restart", "review")
+                        and self.agent_matches(feature, part, record)):
+                    if not record or record.get("status") != "applied":
+                        self.record(feature, part, {"status": "applied", "kind": "agent",
+                                                    "instructions": instructions_digest(part, self.repository)})
+                    continue
+                if not record:
                     self.record(feature, part, {"status": "delegated", "kind": "agent"})
-                    outcome.delegated.append({"part": part, "action": "on", "reason": "needs the agent"})
+                reason = (record or {}).get("note") or "needs the agent"
+                outcome.delegated.append({"part": part, "action": "on", "reason": reason})
                 continue
             try:
                 updated = self.handler(part, "apply")(feature, part, record)
+                updated.pop("unconfirmed_origin", None)
+                updated.pop("note", None)
                 self.record(feature, part, dict(updated, kind=part.kind, status="applied"))
                 outcome.done.append(part.title)
             except Conflict as error:
@@ -789,8 +827,11 @@ class Applier:
         if mode == "keep":
             self.ledger.drop_part(feature.id, part.key)
             return
+        if record and record.get("unconfirmed_origin"):
+            outcome.delegated.append({"part": part, "action": "off", "reason": "conflict: previous state unconfirmed"})
+            return
         if part.agent:
-            if record and record.get("status") in ("applied", "delegated"):
+            if record or (part.data.get("verify") and self.agent_matches(feature, part, None)):
                 outcome.delegated.append({"part": part, "action": "off", "reason": "needs the agent"})
             else:
                 self.ledger.drop_part(feature.id, part.key)
@@ -821,10 +862,27 @@ class Applier:
             outcome = by_feature.get(feature.id)
             if outcome:
                 outcome.delegated.append({"part": part, "action": outcome.action, "reason": f"failed: {step}: {reason}"})
-                record = self.ledger.part(feature.id, part.key)
-                if record and outcome.action == "on":
-                    self.record(feature, part, dict(record, status="failed", note=reason[:500]))
         for outcome in outcomes:
+            for item in outcome.delegated:
+                part, reason = item["part"], item["reason"]
+                prior = self.ledger.part(outcome.feature.id, part.key) or {}
+                if reason.startswith("conflict:"):
+                    state = "review"
+                elif reason.startswith("failed:"):
+                    state = "failed"
+                else:
+                    state = prior.get("status", "delegated")
+                    if state == "applied":
+                        state = "delegated"
+                if not prior and not part.agent:
+                    prior = {"unconfirmed_origin": True}
+                note = prior.get("note", "") if reason == "needs the agent" else reason[:500]
+                record = dict(prior, kind=part.kind, status=state, note=note)
+                if part.agent and item["action"] == "on":
+                    record["requested_instructions"] = instructions_digest(part, self.repository)
+                self.record(outcome.feature, part, record)
+                if part.admin:
+                    failed_keys.add((outcome.feature.id, part.key))
             for part in outcome.feature.parts:
                 if not part.admin or (outcome.feature.id, part.key) in failed_keys:
                     continue
@@ -846,8 +904,18 @@ class Applier:
 
     def merge_agent_results(self, path, features):
         """Record what the agent reported for delegated parts, then remove the report."""
-        report = read_json(path, {})
+        path = Path(path)
+        claimed = path.with_suffix(".processing.json")
+        if not claimed.exists():
+            try:
+                path.replace(claimed)
+            except FileNotFoundError:
+                return False
+        report = read_json(claimed, {})
         if not isinstance(report, dict) or not isinstance(report.get("features"), dict):
+            # A legacy writer may have been interrupted partway through JSON.
+            # Leave the original name available for its next atomic checkpoint.
+            claimed.unlink(missing_ok=True)
             return False
         by_id = {feature.id: feature for feature in features}
         for feature_id, parts in report["features"].items():
@@ -862,22 +930,24 @@ class Applier:
                 if status == "reverted":
                     self.ledger.drop_part(feature_id, part.key)
                 elif status == "applied" and part.agent:
+                    current = instructions_digest(part, self.repository)
+                    prior = self.ledger.part(feature_id, part.key) or {}
                     self.record(feature, part, {
                         "kind": "agent", "status": "applied", "note": str(result.get("note", ""))[:500],
-                        "instructions": self.instructions_digest(part)})
+                        "instructions": result.get("instructions") or prior.get("requested_instructions") or current})
                 elif status == "applied":
-                    self.adopt(feature, part)
-                elif status == "failed":
+                    self.adopt(feature, part, result.get("note", ""))
+                elif status in ("failed", "review", "restart", "skipped"):
                     record = dict(self.ledger.part(feature_id, part.key) or {"kind": part.kind})
-                    self.record(feature, part, dict(record, status="failed",
-                                                                    note=str(result.get("note", ""))[:500]))
+                    self.record(feature, part, dict(record, status="delegated" if status == "skipped" else status,
+                                                    note=str(result.get("note", ""))[:500]))
         self.ledger.save()
-        Path(path).unlink(missing_ok=True)
+        claimed.unlink(missing_ok=True)
         return True
 
-    def adopt(self, feature, part):
+    def adopt(self, feature, part, note=""):
         """Accept the destination as reconciled by the agent, even if it differs from the source."""
-        record = dict(self.ledger.part(feature.id, part.key) or {}, kind=part.kind, status="applied")
+        record = dict(self.ledger.part(feature.id, part.key) or {}, kind=part.kind, status="applied", note=str(note)[:500])
         try:
             if part.kind in ("file", "system-file"):
                 dest = self.system_dest(part) if part.admin else expand(part.data["dest"], self.home, self.environ)
@@ -968,20 +1038,18 @@ def status(feature, choice, mode, ledger, states, failing=None):
         return "unavailable"
     if choice == "new":
         return "new"
-    records = ledger.parts(feature.id)
-    if choice == "off":
-        return "off" if not records or mode == "keep" else "pending"
-    if any(record.get("status") in ("delegated", "failed") for record in records.values()):
-        return "pending"
+    if choice == "off" and (mode == "keep" or not ledger.parts(feature.id)):
+        return "off"
     values = set(states.values())
-    if "modified" in values:
-        return "modified"
-    if values & {"missing", "outdated"}:
+    for label in ("failed", "review", "modified", "verification", "removal"):
+        if label in values:
+            return label
+    if choice == "off" or values & {"missing", "outdated", "pending"}:
         return "pending"
-    return "applied"
+    return "restart" if "restart" in values else "applied"
 
 
-def delegation(outcomes, results_path, *, machine, catalog_errors=()):
+def delegation(outcomes, results_path, *, machine, selections=(), catalog_errors=()):
     """Describe the work left for the agent, in the same style as the other plugin requests."""
     lines = [
         "APLICAR CONFIGURAÇÕES DO CATÁLOGO. O plugin já aplicou ou reverteu as partes simples; "
@@ -994,13 +1062,23 @@ def delegation(outcomes, results_path, *, machine, catalog_errors=()):
         "alterações locais e pergunte quando não houver uma escolha segura.",
         "",
     ]
+    if selections:
+        lines.append("Escolhas atuais desta máquina (contexto, sem ampliar o escopo): " + ", ".join(selections))
     for outcome in outcomes:
         for item in outcome.delegated:
             part = item["part"]
             details = {key: value for key, value in part.data.items() if key != "kind"}
+            mode = outcome.mode if outcome.action == "off" else "default"
             lines.append(f"- {outcome.feature.id} ({outcome.feature.title}) · parte '{part.key}' · tipo {part.kind} "
-                         f"· ação {item['action']}" + (f" · modo {outcome.mode}" if item["action"] == "off" else "")
+                         f"· ação {item['action']}" + (f" · modo {mode}" if item["action"] == "off" else "")
                          + f" · motivo: {item['reason']}")
+            goal = outcome.feature.summary or outcome.feature.title
+            lines.append(f"  Comportamento da personalização quando ligada: {goal}. Parte: {part.title}.")
+            if part.agent and part.base and item["action"] == "on":
+                fingerprint = instructions_digest(part, part.base)
+                lines.append(f'  Ao registrar applied, inclua "instructions": "{fingerprint}" no resultado.')
+            if part.base:
+                lines.append(f"  Diretório das fontes e instruções: {part.base}")
             lines.append(f"  dados: {json.dumps(details, ensure_ascii=False)}")
         for error in outcome.errors:
             lines.append(f"- {outcome.feature.id}: {error}")
@@ -1008,8 +1086,15 @@ def delegation(outcomes, results_path, *, machine, catalog_errors=()):
         lines += ["", "Problemas no catálogo para corrigir no repositório:"] + [f"- {error}" for error in catalog_errors]
     lines += [
         "",
-        f"Ao terminar, grave o resultado em {results_path} como JSON: "
-        '{"features": {"<id>": {"<parte>": {"status": "applied|reverted|failed|skipped", "note": "..."}}}}. '
-        "Use 'applied' só depois de validar. O plugin lê esse arquivo e atualiza os interruptores.",
+        "Para cada parte, abra as instruções referenciadas e identifique o destino ativo. "
+        "Compare o estado observado com o resultado esperado para a ação, considerando as outras escolhas. "
+        "Se já corresponder, registre a verificação imediatamente. Caso contrário, faça apenas a alteração "
+        "pedida, preserve edições locais e verifique o destino novamente.",
+        f"Após CADA parte, atualize {results_path} como JSON cumulativo por substituição atômica "
+        "(arquivo temporário privado no mesmo diretório). Preserve os resultados anteriores: "
+        '{"features": {"<id>": {"<parte>": {"status": "applied|reverted|review|restart|failed|skipped", "note": "..."}}}}. '
+        "Use applied/reverted só após verificar a ação on/off. Em note, registre o que conferiu. "
+        "Use review para um conflito (observado e esperado), restart quando faltar reiniciar (qual aplicativo), "
+        "failed para erro (causa e próximo passo), skipped para uma parte não concluída.",
     ]
     return "\n".join(lines)

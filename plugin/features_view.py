@@ -10,7 +10,7 @@ from pathlib import Path
 
 from gi.repository import Gdk, GLib, Gtk, Pango
 
-from applier import Applier, Ledger, delegation, orphans, status
+from applier import Applier, Ledger, Outcome, delegation, orphans, status
 import checkout
 from context import repository_state
 from core import private_write, read_json
@@ -23,8 +23,10 @@ from i18n import tr
 FILTERS = ("all", "on", "off", "new", "pending", "modified", "release", "unavailable")
 FILTER_LABELS = {"all": "All", "on": "On", "off": "Off", "new": "New", "pending": "Pending", "release": "Changed by Omarchy",
                  "modified": "Edited locally", "unavailable": "Not applicable"}
-STATUS_LABELS = {"applied": "Applied", "pending": "Pending", "modified": "Edited locally", "off": "Off",
-                 "new": "New", "unavailable": "Not applicable", "staged": "Changed", "remove": "Will be removed"}
+STATUS_LABELS = {"applied": "Applied", "verified": "Verified", "pending": "Needs applying", "modified": "Edited locally", "off": "Off",
+                 "removal": "Needs removal", "verification": "Needs verification", "failed": "Action failed", "review": "Local edit needs review",
+                 "restart": "Restart required", "missing": "Missing", "outdated": "Update available",
+                 "new": "New", "unavailable": "Not applicable", "staged": "Ready to apply", "remove": "Will be removed"}
 OFF_CHOICES = (("default", "Return to the Omarchy default"), ("keep", "Keep it as it is"),
                ("previous", "Restore the earlier backup"))
 HERE = {"default": "Here it returns to the Omarchy default.", "keep": "Here it stays as it is.",
@@ -171,7 +173,7 @@ def collect(window, *, fetch=False, settle=True):
         snapshot.binding_needed = not mine or bool(mine["install"] and mine["install"] != install_id())
     snapshot.ledger = Ledger(state_dir(window) / "applied.json")
     applier = make_applier(window, source, snapshot.ledger)
-    if results_path(window).exists():
+    if settle:
         # Removed customizations the agent finished undoing are only in the ledger by now.
         applier.merge_agent_results(results_path(window), snapshot.features + orphans(snapshot.ledger, snapshot.features))
     snapshot.orphans = orphans(snapshot.ledger, snapshot.features)
@@ -181,7 +183,8 @@ def collect(window, *, fetch=False, settle=True):
         if failing:
             snapshot.failing[feature.id] = failing
         choice = snapshot.choice(feature)
-        states = applier.inspect(feature) if choice == "on" and not failing else {}
+        states = (applier.inspect(feature, snapshot.machine, choice) if choice != "new" and not failing
+                  and (choice == "on" or off_mode(feature, snapshot.machine) != "keep") else {})
         snapshot.states[feature.id] = states
         snapshot.labels[feature.id] = status(feature, choice, off_mode(feature, snapshot.machine),
                                              snapshot.ledger, states, failing)
@@ -231,6 +234,25 @@ def mark_reviewed(window, snapshot, version):
     release.save_snapshot(snapshot.features, defaults_snapshot(window, version))
     (state_dir(window) / "release-review.json").unlink(missing_ok=True)
     snapshot.release = {}
+
+
+def agent_handoff(window, snapshot, outcomes, catalog_errors=()):
+    related = {outcome.feature.app for outcome in outcomes if outcome.feature.app}
+    required = {key for outcome in outcomes for key in outcome.feature.requires}
+    relevant = required | {outcome.feature.id for outcome in outcomes}
+    choices = []
+    for feature in snapshot.features:
+        if feature.app not in related and feature.id not in relevant:
+            continue
+        choice = snapshot.choice(feature)
+        choices.append(f"{feature.id}={choice}")
+        if choice == "on":
+            for part in feature.parts:
+                if part.optional:
+                    enabled = part_enabled(feature, part, snapshot.machine)
+                    choices.append(f"{feature.id}.{part.key}={'on' if enabled else 'off'}")
+    return delegation(outcomes, results_path(window), machine=snapshot.machine_name,
+                      selections=choices, catalog_errors=catalog_errors)
 
 
 def run_changes(window, snapshot, changes):
@@ -659,7 +681,9 @@ class FeaturesPage(Gtk.Box):
                 continue
             if wanted == "release" and not snapshot.impact(feature.id):
                 continue
-            if wanted not in ("all", "on", "off", "release") and label != wanted:
+            if wanted == "pending" and label not in ("pending", "removal", "verification", "review", "failed", "restart"):
+                continue
+            if wanted not in ("all", "on", "off", "release", "pending") and label != wanted:
                 continue
             groups.setdefault(group_key(feature), []).append(feature)
         # Programs first, then one group per app, and system-wide settings last.
@@ -693,10 +717,43 @@ class FeaturesPage(Gtk.Box):
     def removing(self, feature):
         return bool(self.staged.get(feature.id, {}).get("remove"))
 
+    def resume_button(self, feature):
+        snapshot = self.snapshot
+        states = snapshot.states.get(feature.id, {})
+        outcome = Outcome(feature, snapshot.choice(feature), off_mode(feature, snapshot.machine))
+        for part in feature.parts:
+            state = states.get(part.key)
+            if state not in ("verification", "review", "failed", "restart"):
+                continue
+            enabled = outcome.action == "on" and part_enabled(feature, part, snapshot.machine)
+            record = snapshot.ledger.part(feature.id, part.key) or {}
+            outcome.delegated.append({"part": part, "action": "on" if enabled else "off",
+                                      "reason": record.get("note") or STATUS_LABELS[state]})
+        if not outcome.delegated or self.staged or snapshot.binding_needed:
+            return None
+        button = Gtk.Button(label=tr('Resume verification'))
+        button.add_css_class("flat")
+        button.add_css_class("link-action")
+        button.set_sensitive(not agent_working(self.window))
+        self.controls.append(button)
+        def resume(*_):
+            if self.loading or agent_working(self.window):
+                return
+            task = agent_handoff(self.window, snapshot, [outcome])
+            self.window.show_page("chat")
+            self.window.submit(tr('Verify {title}', title=feature.title), features_task=task, publish=False)
+        button.connect("clicked", resume)
+        return button
+
     def shown_status(self, feature, label):
         if self.removing(feature):
             return "remove"
-        return "staged" if feature.id in self.staged else label
+        if feature.id in self.staged:
+            return "staged"
+        if label == "applied" and any(part.agent and part_enabled(feature, part, self.snapshot.machine)
+                                      for part in feature.parts):
+            return "verified"
+        return label
 
     def row(self, feature):
         snapshot = self.snapshot
@@ -787,9 +844,15 @@ class FeaturesPage(Gtk.Box):
             detail = [tr('Not applicable here: {condition}', condition=self.snapshot.failing[feature.id])]
         subtitle = Gtk.Label(label=" · ".join(detail), xalign=0, ellipsize=Pango.EllipsizeMode.END)
         subtitle.add_css_class("feature-subtitle")
+        record = self.snapshot.ledger.part(feature.id, feature.parts[0].key) or {}
+        if record.get("note"):
+            subtitle.set_tooltip_text(record["note"])
         subtitle.add_css_class("program-" + feature.program)
         texts.append(subtitle)
         frame.append(texts)
+        retry = self.resume_button(feature)
+        if retry:
+            frame.append(retry)
         frame.append(self.status_widget(self.shown_status(feature, label)))
         switch = Gtk.Switch(valign=Gtk.Align.CENTER, active=self.effective(feature) == "on")
         switch.set_sensitive(label != "unavailable" and not self.window.busy)
@@ -911,8 +974,9 @@ class FeaturesPage(Gtk.Box):
             line.append(name)
             who = tr('agent') if part.agent else tr('asks for password') if part.admin else tr('plugin')
             state = states.get(part.key)
-            if state in ("modified", "missing", "outdated"):
-                who = tr(STATUS_LABELS["modified" if state == "modified" else "pending"]) + " · " + who
+            if state:
+                label = "verified" if part.agent and state == "applied" else state
+                who = tr(STATUS_LABELS[label]) + " · " + who
             hint = Gtk.Label(label=who)
             hint.add_css_class("feature-subtitle")
             line.append(hint)
@@ -927,6 +991,13 @@ class FeaturesPage(Gtk.Box):
                 toggle.connect("notify::active", lambda widget, _, k=key: self.part_toggled(feature, k, widget.get_active()))
                 line.append(toggle)
             content.append(line)
+            record = snapshot.ledger.part(feature.id, part.key) or {}
+            if record.get("note") and state not in ("off", None) and (
+                    state != "applied" or record.get("status") == "applied"):
+                note = Gtk.Label(label=record["note"], xalign=0, wrap=True)
+                note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                note.add_css_class("feature-subtitle")
+                content.append(note)
         # What turning it off (or removing it) does on this machine: one choice, not a list of options.
         current = self.staged.get(feature.id, {}).get("mode", off_mode(feature, snapshot.machine))
         modes = [mode for mode, _ in OFF_CHOICES]
@@ -964,6 +1035,9 @@ class FeaturesPage(Gtk.Box):
         talk.connect("clicked", lambda *_: self.window.discuss_feature(feature))
         self.targets[(feature.id, "agent")] = talk
         actions.append(talk)
+        retry = self.resume_button(feature)
+        if retry:
+            actions.append(retry)
         if removing:
             remove = Gtk.Button(label=tr('Keep in the repository'))
             remove.add_css_class("flat")

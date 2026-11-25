@@ -380,6 +380,62 @@ package = "bad name"
         self.assertIn('frame = "full"', voxtype.read_text())
         self.assertNotIn('visible', voxtype.read_text())
 
+    def test_agent_check_reads_desktop_entry_and_detects_drift_without_reapplying(self):
+        catalog = self.repo / 'features.toml'
+        spec = ('verify = { kind = "ini", dest = "~/.config/example.desktop", section = "Desktop Entry", '
+                'values = { Exec = "example-launcher" } }')
+        catalog.write_text(CATALOG.replace('instructions = "apps/firefox/README.md"',
+                                           'instructions = "apps/firefox/README.md"\n' + spec))
+        features, errors = load_catalog(self.repo)
+        self.assertFalse(errors)
+        feature = next(f for f in features if f.id == 'popups')
+        self.assertEqual(self.applier.inspect(feature)['profile'], 'verification')
+        path = self.config('example.desktop')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('[Desktop Entry]\nExec=example-launcher\n')
+        self.assertFalse(self.applier.enable(feature, {}).delegated)
+        self.assertEqual(self.applier.inspect(feature)['profile'], 'applied')
+        path.write_text('[Desktop Entry]\nExec=other-launcher\n')
+        self.assertEqual(self.applier.inspect(feature)['profile'], 'verification')
+        self.assertTrue(self.applier.enable(feature, {}).delegated)
+        self.assertIn('Exec=other-launcher', path.read_text())
+        catalog.write_text(catalog.read_text().replace('kind = "ini", dest', 'kind = "package", dest'))
+        self.assertTrue(load_catalog(self.repo)[1])
+
+    def test_agent_checkpoint_survives_interruption_and_changed_instructions(self):
+        feature = self.by_id['popups']
+        off = {'parts': {'popups.profile': 'off'}}
+        self.assertEqual(self.applier.inspect(feature, off)['profile'], 'off')
+        self.applier.finish([self.applier.enable(feature, {})])
+        report = self.state / 'agent-results.json'
+        # Reopen after the reader claimed the checkpoint but before it updated the ledger.
+        claimed = report.with_suffix('.processing.json')
+        def checkpoint(path, status, note):
+            path.write_text(json.dumps({'features': {'popups': {'profile': {'status': status, 'note': note}}}}))
+        checkpoint(claimed, 'restart', 'Restart the example app')
+        self.assertTrue(self.applier.merge_agent_results(report, self.features))
+        states = self.applier.inspect(feature)
+        self.assertEqual(status(feature, 'on', 'default', self.ledger, states), 'restart')
+        self.assertEqual(self.ledger.part('popups', 'profile')['note'], 'Restart the example app')
+        # An older agent cannot approve instructions that changed since delegation.
+        checkpoint(report, 'applied', 'Checked active profile')
+        (self.repo / 'apps/firefox/README.md').write_text('Changed behavior.')
+        self.assertTrue(self.applier.merge_agent_results(report, self.features))
+        self.assertEqual(self.applier.inspect(feature)['profile'], 'verification')
+        self.applier.finish([self.applier.enable(feature, {})])
+        checkpoint(report, 'applied', 'Checked updated profile')
+        self.applier.merge_agent_results(report, self.features)
+        self.assertFalse(self.applier.enable(feature, {}).delegated)
+        self.applier.finish([self.applier.disable(feature)])
+        checkpoint(report, 'failed', 'Could not remove the profile entry')
+        self.applier.merge_agent_results(report, self.features)
+        states = self.applier.inspect(feature, choice='off')
+        self.assertEqual(status(feature, 'off', 'default', self.ledger, states), 'failed')
+        self.assertTrue(self.applier.disable(feature).delegated)
+        checkpoint(report, 'reverted', 'Checked removal')
+        self.applier.merge_agent_results(report, self.features)
+        self.assertFalse(self.ledger.applied(feature.id))
+
     def test_agent_parts_are_delegated_and_recorded_from_the_report(self):
         outcome = self.applier.enable(self.by_id['popups'], {})
         self.applier.finish([outcome])

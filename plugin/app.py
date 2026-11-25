@@ -38,14 +38,14 @@ from dictation import DictationInbox, spaced
 import message_view
 from message_view import MessageBody
 from activity_indicator import ActivityIndicator
-from applier import delegation, needs_agent, removal
+from applier import needs_agent, removal
 from release import agent_request as release_request
 from updater import Updater, installed_version
 
 RUNNING_VERSION = installed_version()  # The code in memory; the copy on disk may be newer after an update.
 import checkout
 from features import machine_name
-from features_view import FeaturesPage, local_catalog, results_path
+from features_view import FeaturesPage, agent_handoff, local_catalog, results_path
 
 NATIVE_AGENTS = {"codex", "claude"}
 # How the last task ended while the panel was hidden, for the bar icon.
@@ -1642,8 +1642,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
                                      machine=snapshot.machine_name, local_catalog=local_catalog(self),
                                      problem=published))
             if local:
-                tasks.append(delegation(rest, results_path(self), machine=snapshot.machine_name,
-                                        catalog_errors=snapshot.errors))
+                tasks.append(agent_handoff(self, snapshot, rest, snapshot.errors))
             if local or any(o.delegated or o.errors for o in outcomes):
                 self.show_page("chat")  # Work on this machine: follow it in the conversation.
             if cleanup and len(entries) == 1:

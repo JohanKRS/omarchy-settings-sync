@@ -329,5 +329,17 @@
   "{count} customizations were removed from the repository.": "{count} personalizações foram removidas do repositório.",
   "Applies to the messages you queue now. The current task keeps its choice.": "Vale para as mensagens que você colocar na fila agora. A tarefa atual mantém a escolha dela.",
   "Applies when this message is sent.": "Vale quando esta mensagem for enviada.",
-  "Continuing with {agent}": "Continuando com {agent}"
+  "Continuing with {agent}": "Continuando com {agent}",
+  "Needs removal": "Precisa remover",
+  "Needs applying": "Precisa aplicar",
+  "Verified": "Verificado",
+  "Needs verification": "Precisa verificar",
+  "Action failed": "Falha na ação",
+  "Local edit needs review": "Revisar edição local",
+  "Restart required": "Precisa reiniciar",
+  "Missing": "Ausente",
+  "Update available": "Atualização disponível",
+  "Ready to apply": "Pronto para aplicar",
+  "Resume verification": "Retomar verificação",
+  "Verify {title}": "Verificar {title}"
 }
