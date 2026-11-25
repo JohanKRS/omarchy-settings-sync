@@ -118,6 +118,8 @@ class Theme:
                 border: none; box-shadow: none;
             }}
             .user-message {{ background: transparent; }}
+            .agent-switch {{ font-size: {max(1, size - 2)}px; font-weight: 600; letter-spacing: 1px;
+                             color: alpha({fg}, .55); padding: 10px 2px; border-bottom: 1px solid alpha({fg}, .1); }}
             .card-role {{ color: {accent}; font-size: {max(1, size - 1)}px; opacity: 1; }}
             .composer {{ background: alpha({fg}, .025); border: 1px solid alpha({fg}, .3);
                          border-radius: {radius}px; padding: 8px; }}

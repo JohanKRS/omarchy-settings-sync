@@ -25,6 +25,10 @@ for line in sys.stdin:
     elif message["type"] == "user":
         send({"type": "system", "subtype": "init", "session_id": message["session_id"]})
         text = message['message']['content']
+        if 'CONTINUE-IN-CLAUDE' in text:
+            send({'type': 'assistant', 'message': {'id': 'continued', 'content': [{'type': 'text', 'text': 'Claude continued'}]}})
+            send({'type': 'result', 'subtype': 'success', 'is_error': False})
+            continue
         if 'Show inline alternatives' in text or 'Which color?\nBlue' in text:
             choosing = 'Show inline alternatives' in text
             send({'type': 'assistant', 'message': {'id': 'inline-question' if choosing else 'inline-answer',

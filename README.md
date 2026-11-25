@@ -154,7 +154,7 @@ URL. An empty branch uses the repository's default branch. See the
 | **Copy request** for an external agent | Copy the initial request and context; paste into the CLI's message input and send |
 | **Copy to terminal** on a queued external message, or **Ctrl+Enter** | Copy a follow-up; paste into the agent input and use that CLI's send/queue controls |
 | **Push changes** | Authorize the agent to publish reusable changes to your configuration repository after validation; enabled by default. While the agent works, it sets the choice for the messages you queue; the running task keeps its own |
-| Agent, model, effort | Choose before starting; selections are remembered per agent |
+| Agent, model, effort | Change them between messages and the conversation continues: a new model keeps the agent's session, and another agent first reads what it has not seen. Selections are remembered per agent |
 | **?** in the bar | Codex or Claude is waiting for an answer or permission |
 | Stop icon, beside Send/Queue while working | Interrupt a native conversation, or send Ctrl+C to an embedded CLI |
 | Terminal icon | Open a companion shell in the workspace, including during a task |

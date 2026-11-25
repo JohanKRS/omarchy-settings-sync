@@ -26,7 +26,8 @@ from i18n import tr
 from theme import Theme
 from context import begin_task, finish_task
 from conversation_names import conversation_name
-from conversation_history import ConversationHistory, transcript_context
+from conversation_history import (ConversationHistory, SWITCH_ROLE, USER_ROLES, conversation_sessions,
+                                  transcript_context, unseen_messages)
 from datetime import datetime
 from attachments import MAX_IMAGES, save_image, image_bytes, message_text
 from catalog import MODEL_AGENTS, DISCOVERY_AGENTS, agent_executable, discover_models
@@ -215,6 +216,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.history_id = None
         self.history_panel = None
         self.replay_context = []
+        # The native session of each agent that has taken part in this conversation.
+        self.sessions = {}
+        self.opening_conversation = False
         self.client = None
         self.client_epoch = 0
         self.closing_clients = []
@@ -816,47 +820,103 @@ class SettingsWindow(Gtk.ApplicationWindow):
         private_write(self.settings_file, self.settings)
 
     def agent_changed(self):
+        """Another agent answers from now on; the conversation on screen stays.
+
+        At startup the panel shows the selected agent's current conversation."""
         if not hasattr(self, "content"):
             return
         self.remember_selection()
-        previous = self.selected_agent
-        if previous != self.agent():
+        previous, agent = self.selected_agent, self.agent()
+        if previous != agent:
             if previous:
                 self.thread_ids[previous] = self.thread_id
                 self.save_conversation()
             self.close_client()
-            self.thread_id = self.thread_ids.get(self.agent())
-            self.history_id = self.history_ids.get(self.agent())
-            record = self.history.get(self.history_id)
-            self.replay_context = record.get('replay_context', []) if record else []
-            if record and record.get('repository'):
-                self.settings.update(repository=record['repository'], branch=record.get('branch', ''))
-            self.restore_draft(record.get('draft', {}) if record else {})
-            self.session_file = self.locations["state"] / ("conversation.json" if self.agent() == "codex" else "conversation-" + self.agent() + ".json")
-            self.messages, self.cards, self.message_entries, self.tool_items = [], {}, {}, {}
-            if self.reply_body:
-                self.reply_body.set_choices_enabled(False)
-            self.reply_body = None
-            self.external_prompt = ""
-            self.external_prompt_area.set_visible(False)
-            while self.transcript.get_first_child():
-                self.transcript.remove(self.transcript.get_first_child())
-            for message in read_json(self.session_file, [])[-100:]:
-                self.add_message(message["role"], message["text"], save=False,
-                                 choices_answered=message.get('choices_answered', False), images=message.get('images', []))
-        self.selected_agent = self.agent()
-        if previous != self.agent():
-            self.queue_paused = bool(self.current_queue())
+            self.session_file = self.session_path(agent)
+            if previous is None:
+                self.load_current_conversation(agent)
+            self.selected_agent = agent
+        # Before saving anything: the selectors must show this agent's choices.
         self.render_models()
+        if previous != agent:
+            if previous and not self.opening_conversation:
+                self.continue_with(previous, agent)
+            self.queue_paused = bool(self.current_queue())
         self.show_idle_content()
-        self.status.set_text(tr('Ready · ') + AGENTS[self.agent()])
+        self.status.set_text(tr('Ready · ') + AGENTS[agent])
         self.update_buttons()
         self.refresh_catalog()
+
+    def session_path(self, agent):
+        return self.locations["state"] / ("conversation.json" if agent == "codex" else "conversation-" + agent + ".json")
+
+    def load_current_conversation(self, agent):
+        self.thread_id = self.thread_ids.get(agent)
+        self.history_id = self.history_ids.get(agent)
+        record = self.history.get(self.history_id)
+        self.replay_context = record.get('replay_context', []) if record else []
+        self.sessions = conversation_sessions(record)
+        if self.thread_id and agent in NATIVE_AGENTS:
+            self.sessions[agent] = self.thread_id
+        if record and record.get('repository'):
+            self.settings.update(repository=record['repository'], branch=record.get('branch', ''))
+        self.restore_draft(record.get('draft', {}) if record else {})
+        self.clear_transcript()
+        for message in read_json(self.session_file, [])[-100:]:
+            self.add_message(message["role"], message["text"], save=False, agent=message.get('agent') or agent,
+                             choices_answered=message.get('choices_answered', False), images=message.get('images', []))
+
+    def continue_with(self, previous, agent):
+        """Hand the conversation to another agent, with its draft and queued messages.
+
+        An agent that already took part resumes its own session and first reads
+        what it missed; one new to the conversation starts a session that reads
+        the transcript so far. Its next request carries that text."""
+        if self.thread_id and previous in NATIVE_AGENTS:
+            self.sessions[previous] = self.thread_id
+        resumed = agent in NATIVE_AGENTS and bool(self.sessions.get(agent))
+        self.thread_id = self.sessions[agent] if resumed else None
+        self.thread_ids[agent] = self.thread_id
+        self.thread_loaded = False
+        self.outbox.follow(self.history_id, previous, agent, self.thread_id)
+        if self.history_id:
+            self.history_ids[agent] = self.history_id
+        else:
+            self.history_ids.pop(agent, None)
+        names = self.settings.setdefault('conversation_names', {})
+        title = self.conversation_title()
+        if title:
+            names[agent] = {'thread_id': self.thread_id, 'name': title}
+        else:
+            names.pop(agent, None)
+        self.mark_switch(agent)
+        self.replay_context = unseen_messages(self.messages, agent, resumed)
+        self.save_conversation()
+        self.save_settings()
+
+    def mark_switch(self, agent):
+        """Show where another agent takes over. Switching back before anything was said leaves no mark."""
+        while self.messages and self.messages[-1]['role'] == SWITCH_ROLE:
+            self.messages.pop()
+            self.transcript.remove(self.transcript.get_last_child())
+        last = next((m.get('agent') for m in reversed(self.messages) if m.get('agent')), None)
+        if self.messages and last != agent:
+            self.add_message(SWITCH_ROLE, AGENTS[agent], save=False, agent=agent)
+
+    def conversation_title(self):
+        """The name this conversation already has, for an agent that joins it.
+
+        A conversation is named after its first request, so it has none before that."""
+        if not any(m['role'] in USER_ROLES for m in self.messages):
+            return None
+        record = self.history.index.get(self.history_id) if self.history_id else None
+        return record.get('name') if isinstance(record, dict) else None
 
     def show_idle_content(self):
         if self.terminal_pid:
             self.content.set_visible_child_name("terminal")
-        elif self.agent() in NATIVE_AGENTS and self.messages:
+        elif self.messages:
+            # Also for a terminal agent: its request continues this conversation.
             self.content.set_visible_child_name("chat")
         else:
             self.empty_title.set_text(AGENTS[self.agent()])
@@ -1337,11 +1397,23 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.update_buttons()
         return False
 
-    def add_message(self, role, text, identifier=None, save=True, *, complete=True, choices_answered=False, images=()):
+    def add_message(self, role, text, identifier=None, save=True, *, complete=True, choices_answered=False, images=(),
+                    agent=None):
         if self.reply_body:
             self.reply_body.set_choices_enabled(False)
         self.reply_body = None
-        entry = {"role": role, "text": text}
+        # The agent the message was exchanged with, so that another agent can
+        # later tell what it has not seen.
+        entry = {"role": role, "text": text, "agent": agent or self.agent()}
+        if role == SWITCH_ROLE:
+            marker = label(tr('Continuing with {agent}', agent=AGENTS.get(entry['agent'], text)).upper(), "agent-switch")
+            marker.set_selectable(False)
+            self.transcript.append(marker)
+            self.messages.append(entry)
+            if save:
+                self.save_conversation()
+            self.scroll.to_end()
+            return None
         if images:
             entry['images'] = list(images)
         if choices_answered:
@@ -1394,14 +1466,16 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if not (self.messages or draft['text'] or draft['images'] or self.history_id):
             return
         agent = self.selected_agent or self.agent()
-        text = next((m['text'] for m in self.messages if m['role'] in {'You', 'Você', 'Tú'}), draft['text'])
+        if self.thread_id and agent in NATIVE_AGENTS:
+            self.sessions[agent] = self.thread_id
+        text = next((m['text'] for m in self.messages if m['role'] in USER_ROLES), draft['text'])
         named = self.settings.get('conversation_names', {}).get(agent, {})
         name = named.get('name') if named.get('thread_id') == self.thread_id else None
         identifier = self.ensure_history_id(text)
         self.history.save(identifier, {
             'name': name or conversation_name(text), 'agent': agent, 'thread_id': self.thread_id,
             'repository': self.settings.get('repository', ''), 'branch': self.settings.get('branch', ''),
-            'draft': draft, 'replay_context': self.replay_context,
+            'draft': draft, 'replay_context': self.replay_context, 'sessions': dict(self.sessions),
             'selection': self.settings.get('selections', {}).get(agent, {}),
         }, self.messages)
 
@@ -1645,8 +1719,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         except ValueError as error:
             self.failure(str(error))
             return False
-        if self.replay_context and not self.thread_id:
-            prompt = transcript_context(self.replay_context) + prompt
+        if self.replay_context:
+            prompt = transcript_context(self.replay_context, resumed=bool(self.thread_id)) + prompt
         self.last_prompt = prompt
         self.features_pending = bool(features_task or migrate or sync)
         self.stopping = False
@@ -1656,6 +1730,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         )
         if self.agent() not in NATIVE_AGENTS:
             return self.launch_external(prompt)
+        # An agent that joins a conversation names its new session after it.
+        title = self.conversation_title()
         model, effort = self.selection()
         if self.agent() == "claude" and self.client and (
                 self.client.model, self.client.effort, self.client.permission_mode
@@ -1685,7 +1761,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.client = CodexClient(receive)
         client = self.client
         agent, repository, branch = self.agent(), self.settings['repository'], self.settings.get('branch', '')
-        name = conversation_name(text, sync=sync, create=create, review_existing=review_existing)
+        name = title or conversation_name(text, sync=sync, create=create, review_existing=review_existing)
         def execute():
             # A quick reopen may overlap shutdown of the previous CLI. Wait in
             # the worker, never in the UI, before resuming the same conversation.
@@ -2141,6 +2217,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         return not (self.busy or self.terminal_pid or self.delivery_pending or self.image_pastes or self.question_windows)
 
     def clear_transcript(self):
+        focus = self.get_focus()
+        if focus is not None and focus.is_ancestor(self.transcript):
+            self.input.grab_focus()  # Not left on a message that is about to go.
         self.messages, self.cards, self.message_entries, self.tool_items = [], {}, {}, {}
         if self.reply_body:
             self.reply_body.set_choices_enabled(False)
@@ -2165,6 +2244,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.history_ids.pop(self.agent(), None)
         self.history_id = None
         self.replay_context = []
+        self.sessions = {}
         self.thread_id = None
         self.thread_loaded = False
         self.restore_draft({})
@@ -2195,8 +2275,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 listing.remove(listing.get_first_child())
             query = search.get_text().casefold().strip()
             for record in records:
-                agent = record.get('agent')
-                agent_name = AGENTS.get(agent, tr('Older archive'))
+                agent_name = ', '.join(AGENTS[a] for a in record['agents']) or tr('Older archive')
                 repo = record.get('repository', '')
                 if query and query not in (record['name'] + ' ' + agent_name + ' ' + repo).casefold():
                     continue
@@ -2243,15 +2322,25 @@ class SettingsWindow(Gtk.ApplicationWindow):
         agent = record.get('agent')
         if agent not in NATIVE_AGENTS:
             agent = self.agent() if self.agent() in NATIVE_AGENTS else 'codex'
-        self.agent_select.set_selected(self.agent_ids.index(agent))
+        self.opening_conversation = True  # Selecting its agent must not carry the current conversation over.
+        try:
+            self.agent_select.set_selected(self.agent_ids.index(agent))
+        finally:
+            self.opening_conversation = False
         self.close_client()
         if self.history_panel in self.panels:
             self.history_panel.destroy()
         self.history_id = record['id']
         self.history_ids[agent] = self.history_id
-        self.thread_id = record.get('thread_id')
+        self.sessions = conversation_sessions(record)
+        self.thread_id = self.sessions.get(agent)
+        self.thread_ids[agent] = self.thread_id
         self.thread_loaded = False
-        self.replay_context = record['messages'] if not self.thread_id else []
+        # Older messages carry no agent; they were exchanged with the agent the conversation was saved under.
+        origin = record.get('agent') if record.get('agent') in AGENTS else agent
+        messages = [{**m, 'agent': m.get('agent') or origin} for m in record['messages']]
+        pending = record.get('replay_context') if record.get('agent') == agent else None
+        self.replay_context = pending or unseen_messages(messages, agent, bool(self.thread_id))
         if record.get('repository'):
             self.settings.update(repository=record['repository'], branch=record.get('branch', ''))
         if record.get('selection'):
@@ -2260,8 +2349,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.settings.setdefault('conversation_names', {})[agent] = {
             'name': record['name'], 'thread_id': self.thread_id}
         self.clear_transcript()
-        for message in record['messages']:
-            self.add_message(message['role'], message['text'], save=False,
+        for message in messages:
+            self.add_message(message['role'], message['text'], save=False, agent=message['agent'],
                              choices_answered=message.get('choices_answered', False), images=message.get('images', []))
         self.restore_draft(record.get('draft', {}))
         self.queue_paused = bool(self.current_queue())
